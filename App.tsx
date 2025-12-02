@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { OrderTable } from './components/OrderTable';
 import { Auth } from './components/Auth';
-import { MOCK_ORDERS } from './constants';
 import { Order, ShopifyCredentials, TabType, ImportCategory } from './types';
-import { Search, Bell, HelpCircle, Lock, RefreshCw, AlertCircle, Globe, Upload, X, LogOut, Database, CheckCircle, FileSpreadsheet, ChevronDown } from 'lucide-react';
+import { LogOut, Database, CheckCircle, FileSpreadsheet, Upload, X, RefreshCw, Globe, AlertCircle } from 'lucide-react';
 import { fetchOrders } from './services/shopifyService';
 import { parseShopifyCSV } from './services/csvService';
 import { supabase } from './lib/supabase';
 import { fetchSavedDisputes, fetchUserProfile, saveUserProfile } from './services/disputeService';
+import { loadOrdersFromDb, saveOrdersToDb } from './services/storageService';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -18,7 +18,6 @@ const App: React.FC = () => {
   const [notification, setNotification] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<ShopifyCredentials | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [demoMode, setDemoMode] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('RISK');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,7 +41,7 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Load User Profile (API Keys) & Orders on Login
+  // 2. Load User Profile & Orders on Login
   useEffect(() => {
     if (session) {
       loadInitialData();
@@ -52,10 +51,15 @@ const App: React.FC = () => {
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      // A. Fetch Profile from DB
+      // A. Load cached orders from Database first (Fast!)
+      const dbOrders = await loadOrdersFromDb();
+      if (dbOrders.length > 0) {
+        setOrders(dbOrders);
+      }
+
+      // B. Fetch Profile for API Keys
       const profile = await fetchUserProfile();
       
-      // B. Determine which credentials to use
       let domain = profile?.shopify_domain || import.meta.env.VITE_SHOPIFY_STORE;
       let token = profile?.shopify_access_token || import.meta.env.VITE_SHOPIFY_API_KEY;
 
@@ -65,8 +69,10 @@ const App: React.FC = () => {
           accessToken: token, 
           useProxy: true 
         });
+        // Background sync with Shopify
         await loadAndSyncOrders(domain, token, true);
-      } else {
+      } else if (dbOrders.length === 0) {
+        // Only show settings if we have NO data at all
         setShowSettings(true);
       }
     } catch (err) {
@@ -78,18 +84,28 @@ const App: React.FC = () => {
   };
 
   const loadAndSyncOrders = async (domain: string, token: string, useProxy: boolean) => {
-     const liveOrders = await fetchOrders(domain, token, useProxy);
-     const savedDisputes = await fetchSavedDisputes();
+     try {
+       const liveOrders = await fetchOrders(domain, token, useProxy);
+       const savedDisputes = await fetchSavedDisputes();
 
-     const mergedOrders = liveOrders.map(order => {
-       const saved = savedDisputes.find(d => d.order_id === order.id);
-       if (saved) {
-         return { ...order, savedDispute: saved };
-       }
-       return order;
-     });
+       const mergedOrders = liveOrders.map(order => {
+         const saved = savedDisputes.find(d => d.order_id === order.id);
+         if (saved) {
+           return { ...order, savedDispute: saved };
+         }
+         return order;
+       });
 
-     setOrders(mergedOrders);
+       // SAVE TO DATABASE
+       await saveOrdersToDb(mergedOrders);
+
+       setOrders(mergedOrders);
+       setNotification("Synced with Shopify & Saved to Database");
+       setTimeout(() => setNotification(null), 3000);
+     } catch (e: any) {
+       console.error("Sync failed", e);
+       setError("Sync failed: " + e.message);
+     }
   };
 
   const handleConnect = async (e: React.FormEvent) => {
@@ -131,7 +147,6 @@ const App: React.FC = () => {
       setPendingFile(file);
       setImportCategory('AUTO'); // Default
       setShowImportModal(true);
-      // Reset input so same file can be selected again if cancelled
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -150,20 +165,25 @@ const App: React.FC = () => {
         // Pass the selected category to the parser
         const parsedOrders = parseShopifyCSV(text, importCategory);
         
+        // Restore disputes from DB if they exist for these orders
         const savedDisputes = await fetchSavedDisputes();
         const mergedOrders = parsedOrders.map(order => {
           const saved = savedDisputes.find(d => d.order_id === order.id);
           return saved ? { ...order, savedDispute: saved } : order;
         });
 
+        // SAVE TO DATABASE
+        await saveOrdersToDb(mergedOrders);
+
         setOrders(mergedOrders);
-        setNotification(`Imported ${parsedOrders.length} orders as ${importCategory === 'AUTO' ? 'Auto-Detected' : importCategory.replace('DISPUTE_', '')}.`);
+        setNotification(`Imported & Saved ${parsedOrders.length} orders.`);
         setTimeout(() => setNotification(null), 3000);
         
         // Switch tab based on import type to be helpful
         if (importCategory === 'RISK') setActiveTab('RISK');
         if (importCategory === 'DISPUTE_OPEN') setActiveTab('DISPUTES');
         if (importCategory === 'DISPUTE_WON' || importCategory === 'DISPUTE_LOST') setActiveTab('HISTORY');
+        if (importCategory === 'AUTO') setActiveTab('ALL');
 
       } catch (err: any) {
         console.error("CSV Import Error:", err);
@@ -178,7 +198,6 @@ const App: React.FC = () => {
   };
 
   const handleRefresh = async () => {
-    if (demoMode) return;
     if (!credentials) return;
     setLoading(true);
     try {
