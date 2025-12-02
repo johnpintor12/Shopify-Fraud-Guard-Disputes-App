@@ -29,6 +29,8 @@ export enum DisputeStatus {
 
 export type TabType = 'RISK' | 'DISPUTES' | 'HISTORY' | 'ALL';
 
+export type ImportCategory = 'AUTO' | 'RISK' | 'DISPUTE_OPEN' | 'DISPUTE_WON' | 'DISPUTE_LOST';
+
 export interface Customer {
   id: string;
   name: string;
