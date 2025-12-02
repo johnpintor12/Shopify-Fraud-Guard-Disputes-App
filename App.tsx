@@ -4,7 +4,7 @@ import { OrderTable } from './components/OrderTable';
 import { Auth } from './components/Auth';
 import { MOCK_ORDERS } from './constants';
 import { Order, ShopifyCredentials, TabType } from './types';
-import { Search, Bell, HelpCircle, Lock, RefreshCw, AlertCircle, Globe, Upload, X, LogOut, Database } from 'lucide-react';
+import { Search, Bell, HelpCircle, Lock, RefreshCw, AlertCircle, Globe, Upload, X, LogOut, Database, CheckCircle } from 'lucide-react';
 import { fetchOrders } from './services/shopifyService';
 import { parseShopifyCSV } from './services/csvService';
 import { supabase } from './lib/supabase';
@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notification, setNotification] = useState<string | null>(null);
   const [credentials, setCredentials] = useState<ShopifyCredentials | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
@@ -133,6 +134,37 @@ const App: React.FC = () => {
     }
   };
 
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const text = e.target?.result as string;
+        const parsedOrders = parseShopifyCSV(text);
+        
+        // Fetch saved disputes to merge with CSV data
+        const savedDisputes = await fetchSavedDisputes();
+        const mergedOrders = parsedOrders.map(order => {
+          const saved = savedDisputes.find(d => d.order_id === order.id);
+          return saved ? { ...order, savedDispute: saved } : order;
+        });
+
+        setOrders(mergedOrders);
+        setNotification(`Successfully imported ${parsedOrders.length} orders from CSV.`);
+        setTimeout(() => setNotification(null), 3000);
+      } catch (err) {
+        setError("Failed to parse CSV file. Please ensure it is a valid Shopify export.");
+      } finally {
+        setLoading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleRefresh = async () => {
     if (demoMode) return;
     if (!credentials) return;
@@ -160,6 +192,26 @@ const App: React.FC = () => {
   // --- Main App Render ---
   return (
     <div className="flex min-h-screen bg-[#f1f2f4]">
+      {/* Hidden File Input */}
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        onChange={handleFileUpload} 
+        accept=".csv" 
+        className="hidden" 
+      />
+
+      {/* Toast Notification */}
+      {notification && (
+        <div className="fixed bottom-6 right-6 bg-zinc-900 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-in fade-in slide-in-from-bottom-4">
+          <CheckCircle className="w-5 h-5 text-green-400" />
+          <p className="text-sm font-medium">{notification}</p>
+          <button onClick={() => setNotification(null)} className="text-zinc-400 hover:text-white">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 border border-zinc-200 relative">
@@ -221,6 +273,16 @@ const App: React.FC = () => {
                 {loading ? 'Saving...' : 'Save & Connect'}
               </button>
             </form>
+            
+            <div className="mt-4 pt-4 border-t border-zinc-100">
+               <button 
+                 type="button"
+                 onClick={() => { setShowSettings(false); fileInputRef.current?.click(); }}
+                 className="w-full py-2.5 bg-white border border-zinc-300 text-zinc-700 rounded-lg font-medium hover:bg-zinc-50 flex items-center justify-center gap-2"
+               >
+                 <Upload className="w-4 h-4" /> Import CSV Instead
+               </button>
+            </div>
           </div>
         </div>
       )}
@@ -242,6 +304,14 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="px-3 py-1.5 bg-white border border-zinc-200 text-zinc-700 text-sm font-medium rounded-md hover:bg-zinc-50 flex items-center gap-2"
+              title="Import Shopify CSV"
+            >
+              <Upload className="w-4 h-4" /> Import CSV
+            </button>
+            
             <div className="text-sm text-zinc-500 hidden md:block">
               {session.user.email}
             </div>
@@ -270,7 +340,7 @@ const App: React.FC = () => {
              {loading && orders.length === 0 ? (
                <div className="flex flex-col items-center justify-center py-20 gap-3">
                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900"></div>
-                 <p className="text-zinc-500 text-sm">Syncing with Shopify & Database...</p>
+                 <p className="text-zinc-500 text-sm">Syncing...</p>
                </div>
              ) : (
                <OrderTable 
@@ -284,9 +354,14 @@ const App: React.FC = () => {
              {!loading && orders.length === 0 && (
                <div className="text-center py-12 bg-white rounded-lg border border-zinc-200 border-dashed">
                  <p className="text-zinc-500 mb-3">No orders found. Please configure your store.</p>
-                 <button onClick={() => setShowSettings(true)} className="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm hover:bg-zinc-800">
-                   Configure Store
-                 </button>
+                 <div className="flex gap-3 justify-center">
+                    <button onClick={() => setShowSettings(true)} className="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm hover:bg-zinc-800">
+                      Configure Store
+                    </button>
+                    <button onClick={() => fileInputRef.current?.click()} className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded-md text-sm hover:bg-zinc-50 flex items-center gap-2">
+                      <Upload className="w-4 h-4" /> Import CSV
+                    </button>
+                 </div>
                </div>
              )}
            </div>
