@@ -115,12 +115,12 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
   ];
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-zinc-200 overflow-hidden relative">
+    <div className="bg-white rounded-lg shadow-sm border border-zinc-200 flex flex-col h-full overflow-hidden relative">
       {/* Analysis Modal */}
       {analysisResult && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm" onClick={closeAnalysis}>
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full mx-4 border border-zinc-200 flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b border-zinc-200 flex items-center justify-between bg-zinc-50 rounded-t-xl">
+            <div className="p-6 border-b border-zinc-200 flex items-center justify-between bg-zinc-50 rounded-t-xl shrink-0">
               <div className="flex items-center gap-3">
                 <div className="bg-blue-600 p-2 rounded-lg">
                   <Scale className="w-5 h-5 text-white" />
@@ -136,13 +136,13 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
             
             <div className="p-6 overflow-y-auto flex-1 bg-white">
               <textarea 
-                 className="w-full h-96 p-4 border border-zinc-300 rounded-lg font-mono text-sm leading-relaxed focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                 className="w-full h-full min-h-[300px] p-4 border border-zinc-300 rounded-lg font-mono text-sm leading-relaxed focus:ring-2 focus:ring-blue-500 focus:outline-none"
                  value={analysisResult.text}
                  onChange={(e) => setAnalysisResult({...analysisResult, text: e.target.value})}
               />
             </div>
 
-            <div className="p-4 border-t border-zinc-200 bg-zinc-50 rounded-b-xl flex justify-between items-center">
+            <div className="p-4 border-t border-zinc-200 bg-zinc-50 rounded-b-xl flex justify-between items-center shrink-0">
               <span className="text-xs text-zinc-500">
                 {savedSuccess ? "Draft Saved!" : "Review and edit before saving."}
               </span>
@@ -180,78 +180,81 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
         </div>
       )}
 
-      {/* Urgent Action Banner */}
-      {counts.urgent > 0 && (
-        <div className="bg-red-50 border-b border-red-100 px-4 py-3 flex items-center gap-3">
-          <AlertOctagon className="w-5 h-5 text-red-600" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-red-800">
-              {counts.urgent} Dispute{counts.urgent !== 1 ? 's' : ''} require{counts.urgent === 1 ? 's' : ''} your attention
-            </p>
-            <p className="text-xs text-red-600">Response deadlines are approaching. Use the AI drafter to reply quickly.</p>
+      {/* Header Section (Fixed) */}
+      <div className="flex-none bg-white z-20">
+        {/* Urgent Action Banner */}
+        {counts.urgent > 0 && (
+          <div className="bg-red-50 border-b border-red-100 px-4 py-3 flex items-center gap-3">
+            <AlertOctagon className="w-5 h-5 text-red-600" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-red-800">
+                {counts.urgent} Dispute{counts.urgent !== 1 ? 's' : ''} require{counts.urgent === 1 ? 's' : ''} your attention
+              </p>
+              <p className="text-xs text-red-600">Response deadlines are approaching. Use the AI drafter to reply quickly.</p>
+            </div>
+            <button 
+              onClick={() => onTabChange('DISPUTES')}
+              className="px-3 py-1.5 bg-white border border-red-200 text-red-700 text-xs font-medium rounded hover:bg-red-50 shadow-sm"
+            >
+              View Disputes
+            </button>
           </div>
-          <button 
-            onClick={() => onTabChange('DISPUTES')}
-            className="px-3 py-1.5 bg-white border border-red-200 text-red-700 text-xs font-medium rounded hover:bg-red-50 shadow-sm"
-          >
-            View Disputes
-          </button>
+        )}
+
+        {/* Tabs */}
+        <div className="flex border-b border-zinc-200 overflow-x-auto bg-zinc-50/50">
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
+              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'text-blue-600 border-blue-600 bg-white'
+                  : 'text-zinc-500 border-transparent hover:text-zinc-700 hover:bg-zinc-50'
+              }`}
+            >
+              {tab.label}
+              {tab.count !== undefined && (
+                <span className={`px-2 py-0.5 rounded-full text-xs ${
+                  activeTab === tab.id ? 'bg-blue-100 text-blue-700' : 'bg-zinc-200 text-zinc-600'
+                }`}>
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
-      )}
 
-      {/* Tabs */}
-      <div className="flex border-b border-zinc-200 overflow-x-auto bg-zinc-50/50">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => onTabChange(tab.id)}
-            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
-              activeTab === tab.id
-                ? 'text-blue-600 border-blue-600 bg-white'
-                : 'text-zinc-500 border-transparent hover:text-zinc-700 hover:bg-zinc-50'
-            }`}
-          >
-            {tab.label}
-            {tab.count !== undefined && (
-              <span className={`px-2 py-0.5 rounded-full text-xs ${
-                activeTab === tab.id ? 'bg-blue-100 text-blue-700' : 'bg-zinc-200 text-zinc-600'
-              }`}>
-                {tab.count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Filters Bar */}
-      <div className="p-3 border-b border-zinc-200 flex items-center justify-between gap-4 bg-white">
-        <div className="relative flex-1 max-w-md">
-           <input 
-             type="text" 
-             placeholder="Filter orders..." 
-             className="w-full pl-8 pr-4 py-1.5 text-sm border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
-           />
-           <Filter className="w-4 h-4 text-zinc-400 absolute left-2.5 top-2" />
+        {/* Filters Bar */}
+        <div className="p-3 border-b border-zinc-200 flex items-center justify-between gap-4 bg-white">
+          <div className="relative flex-1 max-w-md">
+             <input 
+               type="text" 
+               placeholder="Filter orders..." 
+               className="w-full pl-8 pr-4 py-1.5 text-sm border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
+             />
+             <Filter className="w-4 h-4 text-zinc-400 absolute left-2.5 top-2" />
+          </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto">
+      {/* Table Section (Scrollable) */}
+      <div className="flex-1 overflow-auto min-h-0 relative">
         <table className="w-full text-left text-sm whitespace-nowrap">
-          <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-600 font-medium">
+          <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-600 font-medium sticky top-0 z-10 shadow-sm">
             <tr>
-              <th className="p-3 w-10 text-center">
+              <th className="p-3 w-10 text-center bg-zinc-50">
                 <input type="checkbox" className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500" />
               </th>
-              <th className="p-3">Order</th>
-              <th className="p-3">Date</th>
-              <th className="p-3">Customer</th>
-              <th className="p-3">Total</th>
-              <th className="p-3">Dispute Status</th>
-              <th className="p-3">Payment</th>
-              <th className="p-3">Fulfillment</th>
-              <th className="p-3">Tags</th>
-              <th className="p-3 text-right">Action</th>
+              <th className="p-3 bg-zinc-50">Order</th>
+              <th className="p-3 bg-zinc-50">Date</th>
+              <th className="p-3 bg-zinc-50">Customer</th>
+              <th className="p-3 bg-zinc-50">Total</th>
+              <th className="p-3 bg-zinc-50">Dispute Status</th>
+              <th className="p-3 bg-zinc-50">Payment</th>
+              <th className="p-3 bg-zinc-50">Fulfillment</th>
+              <th className="p-3 bg-zinc-50">Tags</th>
+              <th className="p-3 text-right bg-zinc-50">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 bg-white">
@@ -273,6 +276,9 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
                   <td className="p-3 font-semibold text-zinc-900 flex flex-col justify-center">
                     <div className="flex items-center gap-2">
                       {order.id}
+                      {order.channel === 'CSV Import' && (
+                        <span className="text-[10px] bg-zinc-100 text-zinc-500 px-1 rounded border border-zinc-200">CSV</span>
+                      )}
                       {order.isHighRisk && (
                         <div className="w-2 h-2 rounded-full bg-red-500" title="Flagged High Risk by Shopify"></div>
                       )}
