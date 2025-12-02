@@ -1,11 +1,45 @@
-import { Order, PaymentStatus, FulfillmentStatus, DeliveryStatus, DisputeStatus } from '../types';
+import { Order, PaymentStatus, FulfillmentStatus, DeliveryStatus, DisputeStatus, ImportCategory } from '../types';
 
-export const parseShopifyCSV = (csvText: string): Order[] => {
-  const lines = csvText.split('\n');
-  const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim());
-
-  const getIndex = (name: string) => headers.indexOf(name);
+// Helper to handle CSV lines with commas inside quotes
+const parseCSVLine = (line: string): string[] => {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
   
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    
+    if (char === '"') {
+      // Toggle quote state
+      if (inQuotes && line[i + 1] === '"') {
+        // Handle escaped quote ("")
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      // Value separator
+      result.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current);
+  return result;
+};
+
+export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUTO'): Order[] => {
+  const lines = csvText.trim().split('\n');
+  if (lines.length < 2) throw new Error("CSV file is empty or invalid.");
+
+  // Normalize headers to lowercase to avoid casing issues
+  const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+
+  const getIndex = (name: string) => headers.indexOf(name.toLowerCase());
+  
+  // Map standard Shopify export columns
   const idx = {
     name: getIndex('Name'),
     createdAt: getIndex('Created at'),
@@ -20,91 +54,120 @@ export const parseShopifyCSV = (csvText: string): Order[] => {
     shippingCountry: getIndex('Shipping Country'),
     shippingMethod: getIndex('Shipping Method'),
     lineItemQty: getIndex('Lineitem quantity'),
-    cancelReason: getIndex('Cancelled at'), // If cancelled_at exists, we check headers for cancel reason or infer
+    cancelReason: getIndex('Cancelled at'),
   };
 
-  // Group rows by Order Name (ID)
+  // Validate critical columns
+  if (idx.name === -1) throw new Error("Invalid CSV: Missing 'Name' column.");
+
   const orderMap = new Map<string, any>();
 
   for (let i = 1; i < lines.length; i++) {
-    // Handle split lines (basic CSV parsing, assuming no commas in quoted fields for simplicity in this demo)
-    // For production, a robust library like PapaParse is recommended.
-    // Here we use a simple split but regex to ignore commas inside quotes
-    const row = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || lines[i].split(',');
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    const row = parseCSVLine(line);
     
-    if (!row || row.length < headers.length) continue;
+    // Clean string helper
+    const val = (index: number) => (row[index] ? row[index].trim() : '');
 
-    const clean = (val: string) => val ? val.replace(/^"|"$/g, '').trim() : '';
-
-    const id = clean(row[idx.name]);
+    const id = val(idx.name);
+    // Skip empty rows or rows without ID
     if (!id) continue;
 
+    // Use a Map to group line items into single orders
     if (!orderMap.has(id)) {
+      const tagsString = val(idx.tags);
+      const tagsList = tagsString.split(',').map(t => t.trim()).filter(t => t);
+      const shippingCity = val(idx.shippingCity);
+      const shippingProv = val(idx.shippingProvince);
+      const shippingCountry = val(idx.shippingCountry);
+
+      let location = 'Unknown';
+      if (shippingCity || shippingProv || shippingCountry) {
+        location = [shippingCity, shippingProv, shippingCountry].filter(Boolean).join(', ');
+      }
+
       orderMap.set(id, {
         id,
-        date: clean(row[idx.createdAt]),
-        email: clean(row[idx.email]),
-        financial: clean(row[idx.financial]),
-        fulfillment: clean(row[idx.fulfillment]),
-        total: parseFloat(clean(row[idx.total]) || '0'),
-        tags: clean(row[idx.tags]),
-        shippingName: clean(row[idx.shippingName]),
-        shippingLocation: `${clean(row[idx.shippingCity])}, ${clean(row[idx.shippingProvince])}, ${clean(row[idx.shippingCountry])}`,
-        shippingMethod: clean(row[idx.shippingMethod]),
+        date: val(idx.createdAt),
+        email: val(idx.email),
+        financial: val(idx.financial),
+        fulfillment: val(idx.fulfillment),
+        total: parseFloat(val(idx.total) || '0'),
+        tags: tagsList,
+        customerName: val(idx.shippingName) || 'Guest',
+        location: location,
+        shippingMethod: val(idx.shippingMethod),
         itemsCount: 0,
-        isCancelled: !!clean(row[idx.cancelReason]),
+        isCancelled: !!val(idx.cancelReason),
       });
     }
 
-    // Accumulate items
+    // Accumulate items count
     const order = orderMap.get(id);
-    order.itemsCount += parseInt(clean(row[idx.lineItemQty]) || '0');
+    const qty = parseInt(val(idx.lineItemQty) || '0');
+    order.itemsCount += qty > 0 ? qty : 0;
   }
 
-  // Convert map to Order[]
+  // Convert map to Order objects
   return Array.from(orderMap.values()).map(o => {
-    const tagsList = o.tags.split(',').map((t: string) => t.trim()).filter((t: string) => t);
+    // Logic for Risk/Disputes based on tags OR Category Override
+    const lowerTags = o.tags.map((t: string) => t.toLowerCase());
     
-    // Logic for Risk/Disputes based on tags
-    const lowerTags = tagsList.map((t: string) => t.toLowerCase());
-    
-    // Determine Dispute Status
     let disputeStatus = DisputeStatus.NONE;
-    if (lowerTags.some((t: string) => t.includes('won'))) disputeStatus = DisputeStatus.WON;
-    else if (lowerTags.some((t: string) => t.includes('lost'))) disputeStatus = DisputeStatus.LOST;
-    else if (lowerTags.some((t: string) => t.includes('chargeback') || t.includes('dispute'))) {
-        if (lowerTags.some((t: string) => t.includes('submitted') || t.includes('review'))) {
-            disputeStatus = DisputeStatus.UNDER_REVIEW;
-        } else {
-            disputeStatus = DisputeStatus.NEEDS_RESPONSE;
+    let isHighRisk = false;
+
+    // --- LOGIC: Apply Overrides based on User Selection ---
+    if (category === 'DISPUTE_OPEN') {
+        disputeStatus = DisputeStatus.NEEDS_RESPONSE;
+        isHighRisk = true; // Disputes are inherently high risk
+    } else if (category === 'DISPUTE_WON') {
+        disputeStatus = DisputeStatus.WON;
+    } else if (category === 'DISPUTE_LOST') {
+        disputeStatus = DisputeStatus.LOST;
+    } else if (category === 'RISK') {
+        isHighRisk = true;
+    } else {
+        // --- AUTO MODE (Default) ---
+        if (lowerTags.some((t: string) => t.includes('won'))) {
+            disputeStatus = DisputeStatus.WON;
+        } else if (lowerTags.some((t: string) => t.includes('lost'))) {
+            disputeStatus = DisputeStatus.LOST;
+        } else if (lowerTags.some((t: string) => t.includes('chargeback') || t.includes('dispute'))) {
+            if (lowerTags.some((t: string) => t.includes('submitted') || t.includes('review'))) {
+                disputeStatus = DisputeStatus.UNDER_REVIEW;
+            } else {
+                disputeStatus = DisputeStatus.NEEDS_RESPONSE;
+            }
         }
+        isHighRisk = lowerTags.some((t: string) => t.includes('fraud') || t.includes('high-risk') || t.includes('risk')) || o.isCancelled;
     }
 
-    // Determine Risk
-    // In CSV, we rely heavily on tags or if we assume all exported orders are high risk (user context)
-    const isHighRisk = lowerTags.some((t: string) => t.includes('fraud') || t.includes('risk')) || o.isCancelled;
+    // Explicit Risk override check (if they selected RISK category, ensure it stays true even if auto logic ran)
+    if (category === 'RISK') isHighRisk = true;
 
     return {
       id: o.id,
       date: new Date(o.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
       customer: {
         id: o.email,
-        name: o.shippingName || 'Guest',
+        name: o.customerName,
         email: o.email,
-        location: o.shippingLocation.replace(/^, /, '').replace(/, $/, '') || 'Unknown',
-        ordersCount: 1 // CSV doesn't provide history count easily
+        location: o.location,
+        ordersCount: 1 // History is not available in single order export
       },
-      channel: 'Imported',
+      channel: 'CSV Import',
       total: o.total,
       paymentStatus: mapFinancialStatus(o.financial),
       fulfillmentStatus: mapFulfillmentStatus(o.fulfillment),
       itemsCount: o.itemsCount,
-      deliveryStatus: o.fulfillment === 'fulfilled' ? DeliveryStatus.DELIVERED : DeliveryStatus.NO_STATUS,
+      deliveryStatus: o.fulfillment?.toLowerCase() === 'fulfilled' ? DeliveryStatus.DELIVERED : DeliveryStatus.NO_STATUS,
       deliveryMethod: o.shippingMethod,
-      tags: tagsList,
+      tags: o.tags,
       isHighRisk: isHighRisk,
       disputeStatus: disputeStatus,
-      disputeDeadline: disputeStatus === DisputeStatus.NEEDS_RESPONSE ? 'Review CSV Data' : undefined
+      disputeDeadline: disputeStatus === DisputeStatus.NEEDS_RESPONSE ? 'Review Data' : undefined
     };
   });
 };
