@@ -306,7 +306,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-4">
             <button 
               onClick={() => fileInputRef.current?.click()}
-              className="px-3 py-1.5 bg-white border border-zinc-200 text-zinc-700 text-sm font-medium rounded-md hover:bg-zinc-50 flex items-center gap-2"
+              className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 flex items-center gap-2 shadow-sm transition-colors"
               title="Import Shopify CSV"
             >
               <Upload className="w-4 h-4" /> Import CSV
@@ -326,7 +326,7 @@ const App: React.FC = () => {
            <div className="space-y-4">
              <div className="flex justify-between items-center mb-2">
                <div className="flex items-center gap-2">
-                 <h2 className="text-xl font-bold text-zinc-900">Fraud Monitoring & Disputes</h2>
+                 <h2 className="text-xl font-bold text-zinc-900">Fraud & Disputes</h2>
                  <button 
                     onClick={handleRefresh}
                     className="p-1.5 rounded-md hover:bg-zinc-200 text-zinc-500 transition-colors"
