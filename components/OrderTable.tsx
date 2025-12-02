@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Order, DisputeStatus, TabType } from '../types';
-import { Filter, Archive, ChevronDown, Eye, FileText, AlertTriangle, Scale, Clock, CheckCircle, XCircle, AlertOctagon, ListFilter, Upload, Save, Check } from 'lucide-react';
+import { Filter, Archive, ChevronDown, Eye, FileText, AlertTriangle, Scale, Clock, CheckCircle, XCircle, AlertOctagon, ListFilter, Upload, Save, Check, ChevronLeft, ChevronRight } from 'lucide-react';
 import { generateChargebackResponse } from '../services/geminiService';
 import { saveDisputeDraft } from '../services/disputeService';
 
@@ -17,6 +17,15 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
   const [analysisResult, setAnalysisResult] = useState<{id: string, text: string} | null>(null);
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 50;
+
+  // Reset pagination when tab changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab]);
 
   const toggleOrder = (id: string) => {
     const newSelected = new Set(selectedOrders);
@@ -77,6 +86,19 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
       }
     });
   }, [orders, activeTab]);
+
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredOrders.length / ITEMS_PER_PAGE);
+  const paginatedOrders = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredOrders.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredOrders, currentPage]);
+
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
 
   // Counters
   const counts = useMemo(() => {
@@ -238,8 +260,8 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
         </div>
       </div>
 
-      {/* Table Section (Scrollable) */}
-      <div className="flex-1 overflow-auto min-h-0 relative">
+      {/* Table Section (Scrollable Area) */}
+      <div className="flex-1 overflow-auto relative bg-white">
         <table className="w-full text-left text-sm whitespace-nowrap">
           <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-600 font-medium sticky top-0 z-10 shadow-sm">
             <tr>
@@ -258,8 +280,8 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 bg-white">
-            {filteredOrders.length > 0 ? (
-              filteredOrders.map((order) => (
+            {paginatedOrders.length > 0 ? (
+              paginatedOrders.map((order) => (
                 <tr 
                   key={order.id} 
                   className={`group hover:bg-zinc-50 transition-colors ${selectedOrders.has(order.id) ? 'bg-zinc-50' : ''}`}
@@ -359,6 +381,34 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Footer - Fixed at bottom of table container */}
+      {filteredOrders.length > 0 && (
+        <div className="flex-none p-3 border-t border-zinc-200 bg-zinc-50 flex items-center justify-between z-20">
+          <div className="text-xs text-zinc-500">
+             Showing {Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, filteredOrders.length)} - {Math.min(currentPage * ITEMS_PER_PAGE, filteredOrders.length)} of {filteredOrders.length} orders
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => goToPage(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="p-1.5 rounded-md border border-zinc-300 bg-white text-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-50"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-sm font-medium text-zinc-700">
+              Page {currentPage} of {totalPages || 1}
+            </span>
+            <button
+              onClick={() => goToPage(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className="p-1.5 rounded-md border border-zinc-300 bg-white text-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-50"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
