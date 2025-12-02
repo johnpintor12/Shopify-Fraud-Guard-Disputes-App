@@ -220,7 +220,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#f1f2f4]">
+    <div className="flex h-screen bg-[#f1f2f4] overflow-hidden">
       {/* Hidden File Input */}
       <input 
         type="file" 
@@ -399,8 +399,8 @@ const App: React.FC = () => {
       />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 bg-white border-b border-zinc-200 flex items-center justify-between px-6 sticky top-0 z-20">
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        <header className="h-14 bg-white border-b border-zinc-200 flex items-center justify-between px-6 shrink-0 z-20">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold text-zinc-800">Dispute Management</h1>
             {credentials && <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full font-medium border border-green-200 flex items-center gap-1"><Globe className="w-3 h-3"/> {credentials.shopDomain}</span>}
@@ -424,7 +424,7 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <main className="p-6 flex-1 overflow-y-auto">
+        <main className="p-6 flex-1 overflow-y-auto scroll-smooth">
            <div className="space-y-4">
              <div className="flex justify-between items-center mb-2">
                <div className="flex items-center gap-2">
