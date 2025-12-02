@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, ShoppingBag, Users, BarChart2, Settings, FileText, ShieldAlert, Scale } from 'lucide-react';
+import { Home, ShoppingBag, Users, BarChart2, Settings, FileText, ShieldAlert } from 'lucide-react';
 import { TabType } from '../types';
 
 interface SidebarProps {
@@ -14,9 +14,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onOpen
       active ? 'bg-zinc-200 text-black' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'
     }`;
 
-  // Helper to determine if a menu item should look active based on the current dashboard tab
-  const isFraudActive = activeTab === 'RISK' || activeTab === 'ALL';
-  const isChargebackActive = activeTab === 'DISPUTES' || activeTab === 'HISTORY';
+  // Helper to determine if the consolidated menu item is active
+  const isRiskActive = activeTab === 'RISK' || activeTab === 'DISPUTES' || activeTab === 'HISTORY' || activeTab === 'ALL';
 
   return (
     <div className="w-64 bg-zinc-50 border-r border-zinc-200 min-h-screen flex flex-col p-3">
@@ -41,16 +40,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, onOpen
         </div>
 
         <div 
-          className={navItemClass(isFraudActive)}
+          className={navItemClass(isRiskActive)}
           onClick={() => onTabChange('RISK')}
         >
-          <ShieldAlert className="w-4 h-4 mr-3" /> Fraud Monitoring
-        </div>
-        <div 
-          className={navItemClass(isChargebackActive)}
-          onClick={() => onTabChange('DISPUTES')}
-        >
-          <Scale className="w-4 h-4 mr-3" /> Chargeback Monitoring
+          <ShieldAlert className="w-4 h-4 mr-3" /> Fraud & Disputes
         </div>
 
         <div className="my-2 border-t border-zinc-200 mx-3"></div>
