@@ -13,9 +13,6 @@ export const Auth: React.FC = () => {
 
   useEffect(() => {
     // Check if Supabase URL is the placeholder or the real deal
-    // We access the internal URL by checking a private property or just assuming based on the client
-    // Since we can't easily access the internal url property on the v2 client publicly without ts-ignore, 
-    // we will check the environment variables directly via the same logic as the lib
     const getEnv = (key: string) => {
         if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[key]) return import.meta.env[key];
         if (typeof process !== 'undefined' && process.env && process.env[key]) return process.env[key];
@@ -41,6 +38,10 @@ export const Auth: React.FC = () => {
         const { error } = await supabase.auth.signUp({
           email,
           password,
+          options: {
+            // CRITICAL: Tells Supabase to redirect back to the current domain (localhost:5173 or Vercel)
+            emailRedirectTo: window.location.origin, 
+          }
         });
         if (error) throw error;
         setMessage("Success! Please check your email to confirm your account.");
