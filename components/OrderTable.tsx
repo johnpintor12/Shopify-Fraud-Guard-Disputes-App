@@ -1,18 +1,22 @@
 import React, { useState, useMemo } from 'react';
 import { Order, DisputeStatus, TabType } from '../types';
-import { Filter, Archive, ChevronDown, Eye, FileText, AlertTriangle, Scale, Clock, CheckCircle, XCircle, AlertOctagon, ListFilter, Upload } from 'lucide-react';
+import { Filter, Archive, ChevronDown, Eye, FileText, AlertTriangle, Scale, Clock, CheckCircle, XCircle, AlertOctagon, ListFilter, Upload, Save, Check } from 'lucide-react';
 import { generateChargebackResponse } from '../services/geminiService';
+import { saveDisputeDraft } from '../services/disputeService';
 
 interface OrderTableProps {
   orders: Order[];
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
+  onRefresh?: () => void;
 }
 
-export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTabChange }) => {
+export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTabChange, onRefresh }) => {
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<{id: string, text: string} | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savedSuccess, setSavedSuccess] = useState(false);
 
   const toggleOrder = (id: string) => {
     const newSelected = new Set(selectedOrders);
@@ -26,10 +30,33 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
 
   const handleGenerateResponse = async (e: React.MouseEvent, order: Order) => {
     e.stopPropagation();
+    
+    // Check if we already have a saved draft locally
+    if (order.savedDispute) {
+      setAnalysisResult({ id: order.id, text: order.savedDispute.rebuttal_text });
+      return;
+    }
+
     setAnalyzingId(order.id);
     const result = await generateChargebackResponse(order);
     setAnalysisResult({ id: order.id, text: result });
     setAnalyzingId(null);
+  };
+
+  const handleSaveDraft = async () => {
+    if (!analysisResult) return;
+    setSaving(true);
+    try {
+      await saveDisputeDraft(analysisResult.id, analysisResult.text);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2000);
+      if (onRefresh) onRefresh(); // Refresh parent to get new DB status
+    } catch (err) {
+      alert("Failed to save draft to database.");
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeAnalysis = () => setAnalysisResult(null);
@@ -39,10 +66,9 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
     return orders.filter(order => {
       switch (activeTab) {
         case 'RISK':
-          // Show high risk (Shopify Native Risk Level: High/Medium) OR fraud tagged, AND open disputes
           return order.isHighRisk || order.tags.some(t => t.toLowerCase().includes('fraud')) || order.disputeStatus !== DisputeStatus.NONE;
         case 'DISPUTES':
-          return order.disputeStatus === DisputeStatus.NEEDS_RESPONSE || order.disputeStatus === DisputeStatus.UNDER_REVIEW;
+          return order.disputeStatus === DisputeStatus.NEEDS_RESPONSE || order.disputeStatus === DisputeStatus.UNDER_REVIEW || !!order.savedDispute;
         case 'HISTORY':
           return order.disputeStatus === DisputeStatus.WON || order.disputeStatus === DisputeStatus.LOST;
         case 'ALL':
@@ -56,14 +82,18 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
   const counts = useMemo(() => {
     return {
       risk: orders.filter(o => o.isHighRisk || o.tags.some(t => t.toLowerCase().includes('fraud'))).length,
-      disputes: orders.filter(o => o.disputeStatus === DisputeStatus.NEEDS_RESPONSE || o.disputeStatus === DisputeStatus.UNDER_REVIEW).length,
+      disputes: orders.filter(o => o.disputeStatus === DisputeStatus.NEEDS_RESPONSE || o.disputeStatus === DisputeStatus.UNDER_REVIEW || !!o.savedDispute).length,
       history: orders.filter(o => o.disputeStatus === DisputeStatus.WON || o.disputeStatus === DisputeStatus.LOST).length,
       urgent: orders.filter(o => o.disputeStatus === DisputeStatus.NEEDS_RESPONSE).length
     };
   }, [orders]);
 
-  const getDisputeBadge = (status: DisputeStatus) => {
-    switch (status) {
+  const getDisputeBadge = (order: Order) => {
+    if (order.savedDispute) {
+       return <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200"><FileText className="w-3 h-3"/> Draft Saved</span>;
+    }
+
+    switch (order.disputeStatus) {
       case DisputeStatus.NEEDS_RESPONSE: 
         return <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200"><AlertTriangle className="w-3 h-3"/> Action Required</span>;
       case DisputeStatus.UNDER_REVIEW:
@@ -97,25 +127,43 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-zinc-900">Chargeback Rebuttal Draft</h3>
-                  <p className="text-xs text-zinc-500">Automated evidence gathering for Order {analysisResult.id}</p>
+                  <p className="text-xs text-zinc-500">
+                    {orders.find(o => o.id === analysisResult.id)?.savedDispute ? "Loading saved draft..." : `Automated evidence gathering for Order ${analysisResult.id}`}
+                  </p>
                 </div>
               </div>
             </div>
             
             <div className="p-6 overflow-y-auto flex-1 bg-white">
-              <pre className="whitespace-pre-wrap font-sans text-sm text-zinc-700 leading-relaxed bg-zinc-50 p-6 rounded-lg border border-zinc-200">
-                {analysisResult.text}
-              </pre>
+              <textarea 
+                 className="w-full h-96 p-4 border border-zinc-300 rounded-lg font-mono text-sm leading-relaxed focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                 value={analysisResult.text}
+                 onChange={(e) => setAnalysisResult({...analysisResult, text: e.target.value})}
+              />
             </div>
 
             <div className="p-4 border-t border-zinc-200 bg-zinc-50 rounded-b-xl flex justify-between items-center">
-              <span className="text-xs text-zinc-500">Generated by Gemini AI • Review before submitting</span>
+              <span className="text-xs text-zinc-500">
+                {savedSuccess ? "Draft Saved!" : "Review and edit before saving."}
+              </span>
               <div className="flex gap-3">
                 <button 
                   onClick={closeAnalysis}
                   className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-50 shadow-sm"
                 >
                   Cancel
+                </button>
+                <button 
+                  onClick={handleSaveDraft}
+                  disabled={saving}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2 transition-colors ${
+                    savedSuccess 
+                    ? 'bg-green-600 text-white border border-green-700' 
+                    : 'bg-white border border-zinc-300 text-zinc-700 hover:bg-zinc-50'
+                  }`}
+                >
+                  {savedSuccess ? <Check className="w-4 h-4"/> : <Save className="w-4 h-4" />}
+                  {saving ? "Saving..." : "Save Draft"}
                 </button>
                 <button 
                   onClick={() => {
@@ -173,9 +221,6 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
             )}
           </button>
         ))}
-        <button className="px-4 py-3 text-sm font-medium text-zinc-500 hover:text-zinc-700 flex items-center gap-1 ml-auto border-b-2 border-transparent">
-          More views <ChevronDown className="w-3 h-3" />
-        </button>
       </div>
 
       {/* Filters Bar */}
@@ -187,14 +232,6 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
              className="w-full pl-8 pr-4 py-1.5 text-sm border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
            />
            <Filter className="w-4 h-4 text-zinc-400 absolute left-2.5 top-2" />
-        </div>
-        <div className="flex items-center gap-2">
-           <button className="p-2 border border-zinc-300 rounded-lg hover:bg-zinc-50 text-zinc-600">
-              <Filter className="w-4 h-4" />
-           </button>
-           <button className="p-2 border border-zinc-300 rounded-lg hover:bg-zinc-50 text-zinc-600">
-              <Archive className="w-4 h-4" />
-           </button>
         </div>
       </div>
 
@@ -246,8 +283,8 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
                   <td className="p-3 text-zinc-900">${order.total.toFixed(2)}</td>
                   <td className="p-3">
                     <div className="flex flex-col">
-                      {getDisputeBadge(order.disputeStatus)}
-                      {order.disputeDeadline && (
+                      {getDisputeBadge(order)}
+                      {order.disputeDeadline && !order.savedDispute && (
                         <span className="text-[10px] text-red-600 font-medium mt-1">{order.disputeDeadline}</span>
                       )}
                     </div>
@@ -264,18 +301,22 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
                      </div>
                   </td>
                   <td className="p-3 text-right">
-                    {order.disputeStatus === DisputeStatus.NEEDS_RESPONSE ? (
+                    {order.disputeStatus === DisputeStatus.NEEDS_RESPONSE || order.savedDispute ? (
                       <button 
-                        className="text-xs px-3 py-1.5 rounded-md border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 shadow-sm flex items-center gap-1 ml-auto"
+                        className={`text-xs px-3 py-1.5 rounded-md border shadow-sm flex items-center gap-1 ml-auto ${
+                          order.savedDispute 
+                          ? 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100'
+                          : 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
                         onClick={(e) => handleGenerateResponse(e, order)}
                         disabled={analyzingId === order.id}
                       >
                         {analyzingId === order.id ? (
-                          <span className="animate-pulse">Generating...</span>
+                          <span className="animate-pulse">Loading...</span>
                         ) : (
                           <>
                              <FileText className="w-3 h-3" />
-                             Draft Rebuttal
+                             {order.savedDispute ? 'Edit Rebuttal' : 'Draft Rebuttal'}
                           </>
                         )}
                       </button>
@@ -295,12 +336,7 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
                       <ListFilter className="w-6 h-6" />
                     </div>
                     <p className="font-medium text-zinc-900">No orders found in this view</p>
-                    <p className="text-sm text-zinc-500 mt-1 mb-4">
-                      {activeTab === 'RISK' 
-                        ? "We are now checking Shopify's native 'High Risk' level and tags. If empty, you have no high-risk orders in the last 60 entries." 
-                        : "Try adjusting your filters or checking a different tab."}
-                    </p>
-                    <div className="flex gap-3">
+                    <div className="flex gap-3 mt-4">
                       {activeTab !== 'ALL' && (
                         <button 
                           onClick={() => onTabChange('ALL')}
@@ -309,19 +345,6 @@ export const OrderTable: React.FC<OrderTableProps> = ({ orders, activeTab, onTab
                           View All Orders
                         </button>
                       )}
-                      <label className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-50 shadow-sm cursor-pointer flex items-center gap-2">
-                         <Upload className="w-3 h-3" /> Import CSV
-                         <input type="file" className="hidden" accept=".csv" onChange={(e) => {
-                             // This is a bit of a hack to bubble up to the parent handler if possible, 
-                             // but for now we rely on the main header button. 
-                             // To fix properly we would pass the handler down.
-                             // For this implementation, I will just add the visual cue or pass handler.
-                             const file = e.target.files?.[0];
-                             if(file) {
-                               alert("Please use the Import CSV button in the header.");
-                             }
-                         }}/>
-                      </label>
                     </div>
                   </div>
                 </td>
