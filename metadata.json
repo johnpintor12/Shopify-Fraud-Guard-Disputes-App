@@ -1,0 +1,4 @@
+{
+  "name": "Shopify Fraud Guard & Disputes",
+  "description": "A high-performance dashboard to monitor Shopify fraud orders and automate chargeback rebuttals using direct GraphQL API integration and Gemini AI."
+}
