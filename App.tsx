@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { OrderTable } from './components/OrderTable';
+import { Auth } from './components/Auth';
 import { MOCK_ORDERS } from './constants';
 import { Order, ShopifyCredentials, TabType } from './types';
-import { Search, Bell, HelpCircle, Lock, RefreshCw, AlertCircle, Globe, Upload, X } from 'lucide-react';
+import { Search, Bell, HelpCircle, Lock, RefreshCw, AlertCircle, Globe, Upload, X, LogOut, Database } from 'lucide-react';
 import { fetchOrders } from './services/shopifyService';
 import { parseShopifyCSV } from './services/csvService';
+import { supabase } from './lib/supabase';
+import { fetchSavedDisputes, fetchUserProfile, saveUserProfile } from './services/disputeService';
 
 const App: React.FC = () => {
+  const [session, setSession] = useState<any>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,14 +21,80 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('RISK');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initial Data Load
+  // 1. Auth & Session Management
   useEffect(() => {
-    if (!credentials && !demoMode && orders.length === 0) {
-      setShowSettings(true);
-    } else if (demoMode) {
-      setOrders(MOCK_ORDERS);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // 2. Load User Profile (API Keys) & Orders on Login
+  useEffect(() => {
+    if (session) {
+      loadInitialData();
     }
-  }, [credentials, demoMode]);
+  }, [session]);
+
+  const loadInitialData = async () => {
+    setLoading(true);
+    try {
+      // A. Fetch Profile from DB
+      const profile = await fetchUserProfile();
+      
+      // B. Determine which credentials to use
+      // Priority: DB Profile -> Env Vars (Vercel) -> Null
+      let domain = profile?.shopify_domain || import.meta.env.VITE_SHOPIFY_STORE;
+      let token = profile?.shopify_access_token || import.meta.env.VITE_SHOPIFY_API_KEY;
+
+      if (domain && token) {
+        setCredentials({ 
+          shopDomain: domain, 
+          accessToken: token, 
+          useProxy: true 
+        });
+        await loadAndSyncOrders(domain, token, true);
+      } else {
+        // No creds found, open modal
+        setShowSettings(true);
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Failed to load user profile.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadAndSyncOrders = async (domain: string, token: string, useProxy: boolean) => {
+     // 1. Fetch live orders from Shopify
+     const liveOrders = await fetchOrders(domain, token, useProxy);
+     
+     // 2. Fetch saved dispute drafts from Supabase
+     const savedDisputes = await fetchSavedDisputes();
+
+     // 3. Merge Data: Attach saved DB drafts to live Shopify orders
+     const mergedOrders = liveOrders.map(order => {
+       const saved = savedDisputes.find(d => d.order_id === order.id);
+       if (saved) {
+         return { 
+           ...order, 
+           savedDispute: saved,
+           // If we have a draft, considering prioritizing it in UI
+         };
+       }
+       return order;
+     });
+
+     setOrders(mergedOrders);
+  };
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,88 +108,58 @@ const App: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const fetchedOrders = await fetchOrders(domain, token, useProxy);
+      // Validate connection
+      await fetchOrders(domain, token, useProxy);
+      
+      // Save to State
       setCredentials({ shopDomain: domain, accessToken: token, useProxy });
-      setOrders(fetchedOrders);
+      
+      // Save to Database (Persist for next time)
+      if (session) {
+        await saveUserProfile(domain, token, ""); // We can add Gemini Key later
+      }
+
+      // Sync
+      await loadAndSyncOrders(domain, token, useProxy);
       setShowSettings(false);
     } catch (err: any) {
-      let errorMessage = "Failed to connect.";
-      if (err instanceof Error) {
-         errorMessage = err.message;
+      let errorMessage = err.message || "Failed to connect.";
+      if (errorMessage.includes('Failed to fetch')) {
+        errorMessage = "Network Error. Please enable 'Use CORS Proxy' or check AdBlocker.";
       }
-      
-      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
-        errorMessage = "Network Error: Unable to reach Shopify.\n\nPossible fixes:\n1. Ensure 'Use CORS Proxy' is CHECKED.\n2. Disable AdBlockers (they often block proxies).\n3. Check if your Shop Domain is correct.";
-      }
-      
       setError(errorMessage);
-      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
   const handleRefresh = async () => {
-    if (demoMode) {
-      setLoading(true);
-      setTimeout(() => setLoading(false), 800);
-      return;
-    }
-
+    if (demoMode) return;
     if (!credentials) return;
-    
     setLoading(true);
     try {
-      const fetchedOrders = await fetchOrders(credentials.shopDomain, credentials.accessToken, credentials.useProxy);
-      setOrders(fetchedOrders);
+      await loadAndSyncOrders(credentials.shopDomain, credentials.accessToken, credentials.useProxy || true);
     } catch (err) {
-      setError("Failed to refresh orders. Please check your connection.");
+      setError("Failed to refresh orders.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setLoading(true);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result as string;
-        const parsedOrders = parseShopifyCSV(text);
-        setOrders(parsedOrders);
-        setShowSettings(false);
-        setDemoMode(false); // Disable demo mode if CSV loaded
-        setError(null);
-      } catch (err) {
-        setError("Failed to parse CSV. Please ensure it is a valid Shopify Order Export.");
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    reader.readAsText(file);
-    // Reset input so same file can be selected again
-    event.target.value = '';
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setOrders([]);
+    setCredentials(null);
   };
 
-  const triggerFileUpload = () => {
-    fileInputRef.current?.click();
-  };
+  // Render Login Screen if not authenticated
+  if (!session) {
+    return <Auth />;
+  }
 
+  // --- Main App Render ---
   return (
     <div className="flex min-h-screen bg-[#f1f2f4]">
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileUpload} 
-        className="hidden" 
-        accept=".csv" 
-      />
-
-      {/* Settings/Connect Modal */}
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 border border-zinc-200 relative">
@@ -131,97 +171,56 @@ const App: React.FC = () => {
             </button>
 
             <div className="flex items-center gap-3 mb-6">
-              <div className="bg-green-100 p-2.5 rounded-lg">
-                <Lock className="w-6 h-6 text-green-700" />
+              <div className="bg-zinc-900 p-2.5 rounded-lg text-white">
+                <Database className="w-6 h-6" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-zinc-900">Connect Store</h2>
-                <p className="text-sm text-zinc-500">Connect via API or Import CSV</p>
+                <h2 className="text-xl font-bold text-zinc-900">Store Settings</h2>
+                <p className="text-sm text-zinc-500">Credentials are saved to your account.</p>
               </div>
             </div>
 
             {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-sm text-red-700 break-words max-h-32 overflow-y-auto">
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-sm text-red-700">
                 <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                <div className="flex-1">
-                  <p className="font-semibold">Error</p>
-                  <p className="whitespace-pre-line">{error}</p>
-                </div>
+                <div>{error}</div>
               </div>
             )}
 
-            <div className="space-y-4">
-              <button 
-                type="button"
-                onClick={triggerFileUpload}
-                className="w-full py-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg font-medium hover:bg-blue-100 transition-colors flex items-center justify-center gap-2"
-              >
-                <Upload className="w-4 h-4" /> Import CSV File
-              </button>
-
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-zinc-200" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-white px-2 text-zinc-500">Or use API</span>
-                </div>
+            <form onSubmit={handleConnect} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 mb-1">Shop Domain</label>
+                <input 
+                  name="shopDomain"
+                  type="text" 
+                  defaultValue={credentials?.shopDomain}
+                  placeholder="your-store.myshopify.com"
+                  className="w-full px-3 py-2 border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
-
-              <form onSubmit={handleConnect} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-700 mb-1">Shop Domain</label>
-                  <input 
-                    name="shopDomain"
-                    type="text" 
-                    placeholder="your-store.myshopify.com"
-                    className="w-full px-3 py-2 border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-zinc-700 mb-1">Admin Access Token</label>
-                  <input 
-                    name="accessToken"
-                    type="password" 
-                    placeholder="shpat_..."
-                    className="w-full px-3 py-2 border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div className="flex items-start gap-2 pt-1">
-                  <div className="flex items-center h-5">
-                    <input
-                      id="useProxy"
-                      name="useProxy"
-                      type="checkbox"
-                      defaultChecked={true}
-                      className="w-4 h-4 text-blue-600 border-zinc-300 rounded focus:ring-blue-500"
-                    />
-                  </div>
-                  <label htmlFor="useProxy" className="text-sm text-zinc-600">
-                    <span className="font-medium text-zinc-900">Use CORS Proxy</span>
-                    <p className="text-xs text-zinc-500 mt-0.5">Required for browser-based API calls.</p>
-                  </label>
-                </div>
-                
-                <div className="pt-2 flex flex-col gap-3">
-                  <button 
-                    type="submit" 
-                    disabled={loading}
-                    className="w-full py-2.5 bg-zinc-900 text-white rounded-lg font-medium hover:bg-zinc-800 disabled:opacity-50 transition-colors"
-                  >
-                    {loading ? 'Connecting...' : 'Connect to Shopify'}
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => { setDemoMode(true); setShowSettings(false); }}
-                    className="w-full py-2.5 bg-white border border-zinc-300 text-zinc-700 rounded-lg font-medium hover:bg-zinc-50 transition-colors"
-                  >
-                    Use Demo Data
-                  </button>
-                </div>
-              </form>
-            </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 mb-1">Admin Access Token</label>
+                <input 
+                  name="accessToken"
+                  type="password" 
+                  defaultValue={credentials?.accessToken}
+                  placeholder="shpat_..."
+                  className="w-full px-3 py-2 border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="flex items-start gap-2 pt-1">
+                 <input id="useProxy" name="useProxy" type="checkbox" defaultChecked={true} className="mt-1" />
+                 <label htmlFor="useProxy" className="text-sm text-zinc-600">Use CORS Proxy (Required for Web)</label>
+              </div>
+              
+              <button 
+                type="submit" 
+                disabled={loading}
+                className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? 'Saving...' : 'Save & Connect'}
+              </button>
+            </form>
           </div>
         </div>
       )}
@@ -238,37 +237,17 @@ const App: React.FC = () => {
         {/* Top Header */}
         <header className="h-14 bg-white border-b border-zinc-200 flex items-center justify-between px-6 sticky top-0 z-20">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-zinc-800">
-              Dispute Management
-            </h1>
-            {demoMode && <span className="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs rounded-full font-medium border border-amber-200">Demo Mode</span>}
-            {credentials && <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full font-medium border border-green-200 flex items-center gap-1"><Globe className="w-3 h-3"/> Connected</span>}
+            <h1 className="text-lg font-bold text-zinc-800">Dispute Management</h1>
+            {credentials && <span className="px-2 py-0.5 bg-green-100 text-green-800 text-xs rounded-full font-medium border border-green-200 flex items-center gap-1"><Globe className="w-3 h-3"/> {credentials.shopDomain}</span>}
           </div>
           
           <div className="flex items-center gap-4">
-            <button 
-              onClick={triggerFileUpload}
-              className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-white border border-zinc-300 rounded-md text-sm font-medium text-zinc-700 hover:bg-zinc-50 shadow-sm"
-            >
-              <Upload className="w-4 h-4" /> Import CSV
-            </button>
-            <div className="relative w-64 hidden md:block">
-              <input 
-                type="text" 
-                placeholder="Search orders..." 
-                className="w-full bg-zinc-100 border border-transparent rounded-md py-1.5 pl-9 pr-3 text-sm focus:bg-white focus:border-zinc-300 focus:outline-none transition-all"
-              />
-              <Search className="w-4 h-4 text-zinc-500 absolute left-2.5 top-2" />
+            <div className="text-sm text-zinc-500 hidden md:block">
+              {session.user.email}
             </div>
-            <button className="p-2 text-zinc-500 hover:bg-zinc-100 rounded-full">
-              <Bell className="w-5 h-5" />
+            <button onClick={handleSignOut} className="p-2 text-zinc-500 hover:bg-zinc-100 rounded-full" title="Sign Out">
+              <LogOut className="w-5 h-5" />
             </button>
-             <button className="p-2 text-zinc-500 hover:bg-zinc-100 rounded-full">
-              <HelpCircle className="w-5 h-5" />
-            </button>
-            <div className="w-8 h-8 rounded-full bg-green-700 text-white flex items-center justify-center text-xs font-bold">
-              SH
-            </div>
           </div>
         </header>
 
@@ -286,37 +265,28 @@ const App: React.FC = () => {
                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                  </button>
                </div>
-               <div className="flex gap-3">
-                 <button className="px-3 py-1.5 bg-white border border-zinc-300 rounded-lg text-sm font-medium text-zinc-700 hover:bg-zinc-50 shadow-sm">
-                   Export Evidence
-                 </button>
-               </div>
              </div>
              
              {loading && orders.length === 0 ? (
                <div className="flex flex-col items-center justify-center py-20 gap-3">
                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900"></div>
-                 <p className="text-zinc-500 text-sm">Loading orders...</p>
+                 <p className="text-zinc-500 text-sm">Syncing with Shopify & Database...</p>
                </div>
              ) : (
                <OrderTable 
                  orders={orders} 
                  activeTab={activeTab} 
                  onTabChange={setActiveTab}
+                 onRefresh={handleRefresh}
                />
              )}
              
-             {!loading && orders.length === 0 && !demoMode && (
+             {!loading && orders.length === 0 && (
                <div className="text-center py-12 bg-white rounded-lg border border-zinc-200 border-dashed">
-                 <p className="text-zinc-500 mb-3">No orders found. Connect API or Import CSV.</p>
-                 <div className="flex justify-center gap-3">
-                    <button onClick={() => setShowSettings(true)} className="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm hover:bg-zinc-800">
-                      Connect API
-                    </button>
-                    <button onClick={triggerFileUpload} className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded-md text-sm hover:bg-zinc-50">
-                      <Upload className="w-4 h-4 inline mr-2" /> Import CSV
-                    </button>
-                 </div>
+                 <p className="text-zinc-500 mb-3">No orders found. Please configure your store.</p>
+                 <button onClick={() => setShowSettings(true)} className="px-4 py-2 bg-zinc-900 text-white rounded-md text-sm hover:bg-zinc-800">
+                   Configure Store
+                 </button>
                </div>
              )}
            </div>

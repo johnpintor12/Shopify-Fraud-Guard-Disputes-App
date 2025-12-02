@@ -1,9 +1,17 @@
 import { GoogleGenAI } from "@google/genai";
 import { Order } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// safely access the key, defaulting to empty string to prevent constructor crash
+const apiKey = process.env.API_KEY || '';
+
+// Only initialize if key exists, otherwise we handle it in the function
+const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 export const generateChargebackResponse = async (order: Order): Promise<string> => {
+  if (!ai) {
+    return "API Key missing. Please add API_KEY to your Vercel Environment Variables.";
+  }
+
   try {
     const model = 'gemini-2.5-flash';
     
@@ -46,6 +54,6 @@ export const generateChargebackResponse = async (order: Order): Promise<string> 
     return response.text || "Error generating response.";
   } catch (error) {
     console.error("Gemini Error:", error);
-    return "Unable to generate chargeback response. Please check your API key.";
+    return "Unable to generate response. Please check your API key and quota.";
   }
 };

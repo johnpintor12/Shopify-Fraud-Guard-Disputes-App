@@ -37,6 +37,14 @@ export interface Customer {
   ordersCount: number;
 }
 
+export interface SavedDispute {
+  id: string;
+  order_id: string;
+  status: string;
+  rebuttal_text: string;
+  created_at: string;
+}
+
 export interface Order {
   id: string; // e.g., #439715
   date: string;
@@ -52,6 +60,9 @@ export interface Order {
   isHighRisk: boolean;
   disputeStatus: DisputeStatus;
   disputeDeadline?: string;
+  
+  // Database fields
+  savedDispute?: SavedDispute; 
 }
 
 export interface ShopifyCredentials {
