@@ -3,8 +3,8 @@ import { Sidebar } from './components/Sidebar';
 import { OrderTable } from './components/OrderTable';
 import { Auth } from './components/Auth';
 import { MOCK_ORDERS } from './constants';
-import { Order, ShopifyCredentials, TabType } from './types';
-import { Search, Bell, HelpCircle, Lock, RefreshCw, AlertCircle, Globe, Upload, X, LogOut, Database, CheckCircle } from 'lucide-react';
+import { Order, ShopifyCredentials, TabType, ImportCategory } from './types';
+import { Search, Bell, HelpCircle, Lock, RefreshCw, AlertCircle, Globe, Upload, X, LogOut, Database, CheckCircle, FileSpreadsheet, ChevronDown } from 'lucide-react';
 import { fetchOrders } from './services/shopifyService';
 import { parseShopifyCSV } from './services/csvService';
 import { supabase } from './lib/supabase';
@@ -21,6 +21,11 @@ const App: React.FC = () => {
   const [demoMode, setDemoMode] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('RISK');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // CSV Import State
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importCategory, setImportCategory] = useState<ImportCategory>('AUTO');
 
   // 1. Auth & Session Management
   useEffect(() => {
@@ -51,7 +56,6 @@ const App: React.FC = () => {
       const profile = await fetchUserProfile();
       
       // B. Determine which credentials to use
-      // Priority: DB Profile -> Env Vars (Vercel) -> Null
       let domain = profile?.shopify_domain || import.meta.env.VITE_SHOPIFY_STORE;
       let token = profile?.shopify_access_token || import.meta.env.VITE_SHOPIFY_API_KEY;
 
@@ -63,7 +67,6 @@ const App: React.FC = () => {
         });
         await loadAndSyncOrders(domain, token, true);
       } else {
-        // No creds found, open modal
         setShowSettings(true);
       }
     } catch (err) {
@@ -75,21 +78,13 @@ const App: React.FC = () => {
   };
 
   const loadAndSyncOrders = async (domain: string, token: string, useProxy: boolean) => {
-     // 1. Fetch live orders from Shopify
      const liveOrders = await fetchOrders(domain, token, useProxy);
-     
-     // 2. Fetch saved dispute drafts from Supabase
      const savedDisputes = await fetchSavedDisputes();
 
-     // 3. Merge Data: Attach saved DB drafts to live Shopify orders
      const mergedOrders = liveOrders.map(order => {
        const saved = savedDisputes.find(d => d.order_id === order.id);
        if (saved) {
-         return { 
-           ...order, 
-           savedDispute: saved,
-           // If we have a draft, considering prioritizing it in UI
-         };
+         return { ...order, savedDispute: saved };
        }
        return order;
      });
@@ -109,18 +104,13 @@ const App: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      // Validate connection
       await fetchOrders(domain, token, useProxy);
-      
-      // Save to State
       setCredentials({ shopDomain: domain, accessToken: token, useProxy });
       
-      // Save to Database (Persist for next time)
       if (session) {
-        await saveUserProfile(domain, token, ""); // We can add Gemini Key later
+        await saveUserProfile(domain, token, "");
       }
 
-      // Sync
       await loadAndSyncOrders(domain, token, useProxy);
       setShowSettings(false);
     } catch (err: any) {
@@ -134,18 +124,32 @@ const App: React.FC = () => {
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Initial File Selection -> Opens Modal
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (file) {
+      setPendingFile(file);
+      setImportCategory('AUTO'); // Default
+      setShowImportModal(true);
+      // Reset input so same file can be selected again if cancelled
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // Final Processing after Modal selection
+  const processImport = () => {
+    if (!pendingFile) return;
 
     setLoading(true);
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
         const text = e.target?.result as string;
-        const parsedOrders = parseShopifyCSV(text);
+        console.log("Parsing CSV with category:", importCategory);
         
-        // Fetch saved disputes to merge with CSV data
+        // Pass the selected category to the parser
+        const parsedOrders = parseShopifyCSV(text, importCategory);
+        
         const savedDisputes = await fetchSavedDisputes();
         const mergedOrders = parsedOrders.map(order => {
           const saved = savedDisputes.find(d => d.order_id === order.id);
@@ -153,16 +157,24 @@ const App: React.FC = () => {
         });
 
         setOrders(mergedOrders);
-        setNotification(`Successfully imported ${parsedOrders.length} orders from CSV.`);
+        setNotification(`Imported ${parsedOrders.length} orders as ${importCategory === 'AUTO' ? 'Auto-Detected' : importCategory.replace('DISPUTE_', '')}.`);
         setTimeout(() => setNotification(null), 3000);
-      } catch (err) {
-        setError("Failed to parse CSV file. Please ensure it is a valid Shopify export.");
+        
+        // Switch tab based on import type to be helpful
+        if (importCategory === 'RISK') setActiveTab('RISK');
+        if (importCategory === 'DISPUTE_OPEN') setActiveTab('DISPUTES');
+        if (importCategory === 'DISPUTE_WON' || importCategory === 'DISPUTE_LOST') setActiveTab('HISTORY');
+
+      } catch (err: any) {
+        console.error("CSV Import Error:", err);
+        setError(`Failed to parse CSV file: ${err.message}`);
       } finally {
         setLoading(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+        setPendingFile(null);
+        setShowImportModal(false);
       }
     };
-    reader.readAsText(file);
+    reader.readAsText(pendingFile);
   };
 
   const handleRefresh = async () => {
@@ -184,22 +196,94 @@ const App: React.FC = () => {
     setCredentials(null);
   };
 
-  // Render Login Screen if not authenticated
   if (!session) {
     return <Auth />;
   }
 
-  // --- Main App Render ---
   return (
     <div className="flex min-h-screen bg-[#f1f2f4]">
       {/* Hidden File Input */}
       <input 
         type="file" 
         ref={fileInputRef} 
-        onChange={handleFileUpload} 
+        onChange={handleFileSelect} 
         accept=".csv" 
         className="hidden" 
       />
+
+      {/* Import Categorization Modal */}
+      {showImportModal && pendingFile && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 border border-zinc-200">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="bg-blue-100 p-2.5 rounded-lg text-blue-600">
+                <FileSpreadsheet className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-zinc-900">Categorize Import</h2>
+                <p className="text-sm text-zinc-500 max-w-[250px] truncate">{pendingFile.name}</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-zinc-600 mb-4">
+              How should we classify the orders in this file?
+            </p>
+
+            <div className="space-y-3 mb-6">
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'AUTO' ? 'border-blue-500 bg-blue-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'AUTO'} onChange={() => setImportCategory('AUTO')} className="text-blue-600" />
+                <div className="flex-1">
+                  <div className="font-medium text-sm text-zinc-900">Auto-Detect (Smart)</div>
+                  <div className="text-xs text-zinc-500">Use tags & status from file</div>
+                </div>
+              </label>
+
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'RISK' ? 'border-red-500 bg-red-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'RISK'} onChange={() => setImportCategory('RISK')} className="text-red-600" />
+                <div className="flex-1">
+                  <div className="font-medium text-sm text-zinc-900">High Risk / Fraud</div>
+                  <div className="text-xs text-zinc-500">Force all as High Risk</div>
+                </div>
+              </label>
+
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_OPEN' ? 'border-orange-500 bg-orange-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_OPEN'} onChange={() => setImportCategory('DISPUTE_OPEN')} className="text-orange-600" />
+                <div className="flex-1">
+                  <div className="font-medium text-sm text-zinc-900">Open Disputes</div>
+                  <div className="text-xs text-zinc-500">Mark as Action Required</div>
+                </div>
+              </label>
+
+              <div className="flex gap-2">
+                 <label className={`flex-1 flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_WON' ? 'border-green-500 bg-green-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                    <input type="radio" name="cat" checked={importCategory === 'DISPUTE_WON'} onChange={() => setImportCategory('DISPUTE_WON')} className="text-green-600" />
+                    <div className="font-medium text-sm text-zinc-900">Won</div>
+                 </label>
+                 <label className={`flex-1 flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_LOST' ? 'border-zinc-500 bg-zinc-100' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                    <input type="radio" name="cat" checked={importCategory === 'DISPUTE_LOST'} onChange={() => setImportCategory('DISPUTE_LOST')} className="text-zinc-600" />
+                    <div className="font-medium text-sm text-zinc-900">Lost</div>
+                 </label>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button 
+                onClick={() => { setShowImportModal(false); setPendingFile(null); }}
+                className="flex-1 py-2.5 bg-white border border-zinc-300 text-zinc-700 rounded-lg font-medium hover:bg-zinc-50"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={processImport}
+                disabled={loading}
+                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loading ? 'Processing...' : 'Import Orders'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notification */}
       {notification && (
@@ -212,6 +296,7 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 border border-zinc-200 relative">
@@ -296,7 +381,6 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Header */}
         <header className="h-14 bg-white border-b border-zinc-200 flex items-center justify-between px-6 sticky top-0 z-20">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold text-zinc-800">Dispute Management</h1>
@@ -321,7 +405,6 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        {/* Dashboard Content */}
         <main className="p-6 flex-1 overflow-y-auto">
            <div className="space-y-4">
              <div className="flex justify-between items-center mb-2">
