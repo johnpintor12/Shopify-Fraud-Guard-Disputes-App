@@ -2,14 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* CRITICAL FIX: Force the root to fill the screen exactly. 
-   This enables inner-div scrolling for the table. */
+/* CRITICAL FIX: This forces the app to fit the screen exactly. */
 html, body, #root {
   height: 100%;
   width: 100%;
   margin: 0;
   padding: 0;
-  overflow: hidden; /* Prevents the whole page from scrolling */
+  overflow: hidden; /* Stops the whole page from scrolling */
 }
 
 body {
