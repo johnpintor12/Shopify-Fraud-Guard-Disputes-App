@@ -2,7 +2,8 @@
 export default {
   content: [
     "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}", /* CHANGED: Added ./src to be specific */
+    "./src/**/*.{js,ts,jsx,tsx}", /* Standard Vite structure */
+    "./*.{js,ts,jsx,tsx}",        /* ALSO scan root files just in case */
   ],
   theme: {
     extend: {},
