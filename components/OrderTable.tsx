@@ -1,6 +1,13 @@
+// src/components/OrderTable.tsx
 import React, { useMemo, useState, useEffect } from "react";
 import { Order, TabType } from "../types";
-import { AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Filter,
+  RefreshCw,
+} from "lucide-react";
 
 interface OrderTableProps {
   orders: Order[];
@@ -9,49 +16,7 @@ interface OrderTableProps {
   onRefresh: () => void;
 }
 
-const PAGE_SIZE = 50;
-
-// Classification helpers – we rely on flexible fields so it works
-// for both Shopify API and CSV imports.
-const isRiskOrder = (order: Order) => {
-  const o: any = order;
-  const cat = (o.import_category || "").toString().toUpperCase();
-  const risk = (o.risk_level || o.riskCategory || "").toString().toUpperCase();
-  const tags = (
-    Array.isArray(o.tags)
-      ? o.tags.join(",")
-      : (o.tags || "").toString()
-  ).toUpperCase();
-
-  if (cat === "RISK" || cat === "FRAUD") return true;
-  if (risk.includes("HIGH") || risk.includes("FRAUD")) return true;
-  if (tags.includes("FRAUD") || tags.includes("HIGH RISK")) return true;
-  return false;
-};
-
-const isOpenDispute = (order: Order) => {
-  const o: any = order;
-  const cat = (o.import_category || "").toString().toUpperCase();
-  const status = (o.dispute_status || "").toString().toUpperCase();
-  return (
-    cat === "DISPUTE_OPEN" ||
-    status.includes("OPEN") ||
-    status.includes("PENDING") ||
-    status.includes("ACTION REQUIRED")
-  );
-};
-
-const isHistoryDispute = (order: Order) => {
-  const o: any = order;
-  const cat = (o.import_category || "").toString().toUpperCase();
-  const status = (o.dispute_status || "").toString().toUpperCase();
-  return (
-    cat === "DISPUTE_WON" ||
-    cat === "DISPUTE_LOST" ||
-    status.includes("WON") ||
-    status.includes("LOST")
-  );
-};
+const ROWS_PER_PAGE = 50;
 
 export const OrderTable: React.FC<OrderTableProps> = ({
   orders,
@@ -59,64 +24,107 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   onTabChange,
   onRefresh,
 }) => {
-  const [page, setPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(1);
 
-  // Counts for badges
-  const riskCount = useMemo(
-    () => orders.filter(isRiskOrder).length,
-    [orders]
-  );
-  const openCount = useMemo(
-    () => orders.filter(isOpenDispute).length,
-    [orders]
-  );
-  const historyCount = useMemo(
-    () => orders.filter(isHistoryDispute).length,
-    [orders]
-  );
-
-  const allCount = orders.length;
-
-  // Filter for active tab
+  // ---------- FILTERING (Tab logic) ----------
   const filtered = useMemo(() => {
-    switch (activeTab) {
-      case "RISK":
-        return orders.filter(isRiskOrder);
-      case "DISPUTES":
-        return orders.filter(isOpenDispute);
-      case "HISTORY":
-        return orders.filter(isHistoryDispute);
-      case "ALL":
-      default:
-        return orders;
-    }
+    return orders.filter((order) => {
+      const o: any = order;
+      const tagString: string =
+        (o.tags && Array.isArray(o.tags) ? o.tags.join(",") : o.tags) || "";
+      const lowerTags = tagString.toLowerCase();
+
+      const disputeStatus = (
+        o.dispute_status ||
+        o.disputeStatus ||
+        ""
+      ).toLowerCase();
+      const riskFlag = (o.risk_category || o.riskCategory || "").toLowerCase();
+      const importCategory = (
+        o.import_category ||
+        o.importCategory ||
+        ""
+      ).toLowerCase();
+
+      switch (activeTab) {
+        case "RISK": {
+          // High-risk / Fraud
+          return (
+            riskFlag.includes("high") ||
+            lowerTags.includes("high risk") ||
+            lowerTags.includes("fraud") ||
+            importCategory.includes("risk") ||
+            importCategory.includes("fraud")
+          );
+        }
+        case "DISPUTES": {
+          // Open / pending chargebacks
+          return (
+            disputeStatus.includes("open") ||
+            disputeStatus.includes("pending") ||
+            disputeStatus.includes("action required") ||
+            importCategory.includes("dispute_open")
+          );
+        }
+        case "HISTORY": {
+          // Won / lost disputes
+          return (
+            disputeStatus.includes("won") ||
+            disputeStatus.includes("lost") ||
+            importCategory.includes("dispute_won") ||
+            importCategory.includes("dispute_lost")
+          );
+        }
+        case "ALL":
+        default:
+          return true;
+      }
+    });
   }, [orders, activeTab]);
 
-  // Reset to first page when tab/data changes
-  useEffect(() => {
-    setPage(1);
-  }, [activeTab, filtered.length]);
-
+  // ---------- PAGINATION ----------
   const total = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
+  const totalPages = Math.max(1, Math.ceil(total / ROWS_PER_PAGE));
 
-  const startIndex = total === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const endIndex = total === 0 ? 0 : Math.min(currentPage * PAGE_SIZE, total);
+  const safePage = Math.min(currentPage, totalPages);
+  const sliceStart = (safePage - 1) * ROWS_PER_PAGE;
+  const sliceEnd = sliceStart + ROWS_PER_PAGE;
+  const pageOrders = filtered.slice(sliceStart, sliceEnd);
 
-  const pageOrders = useMemo(
-    () =>
-      filtered.slice(
-        (currentPage - 1) * PAGE_SIZE,
-        (currentPage - 1) * PAGE_SIZE + PAGE_SIZE
-      ),
-    [filtered, currentPage]
-  );
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, total]);
 
-  const handlePrev = () => setPage((p) => Math.max(1, p - 1));
-  const handleNext = () => setPage((p) => Math.min(totalPages, p + 1));
+  const handlePrev = () =>
+    setCurrentPage((p) => Math.max(1, p - 1));
+  const handleNext = () =>
+    setCurrentPage((p) => Math.min(totalPages, p + 1));
 
-  // Helpers for display (defensive, works with many shapes)
+  const displayStart = total === 0 ? 0 : sliceStart + 1;
+  const displayEnd =
+    total === 0 ? 0 : Math.min(sliceEnd, total);
+
+  // ---------- Helpers ----------
+  const formatMoney = (order: Order) => {
+    const o: any = order as any;
+    const amount =
+      o.total_price ||
+      o.totalPrice ||
+      o.current_total_price ||
+      o.total ||
+      0;
+    const currency = o.currency || "USD";
+    const n =
+      typeof amount === "number"
+        ? amount
+        : parseFloat(String(amount) || "0");
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(n);
+  };
+
   const getOrderName = (order: Order) => {
     const o: any = order;
     return (
@@ -127,11 +135,11 @@ export const OrderTable: React.FC<OrderTableProps> = ({
     );
   };
 
-  const getCreated = (order: Order) => {
+  const getCreatedAt = (order: Order) => {
     const o: any = order;
     const raw =
-      o.createdAt ||
       o.created_at ||
+      o.createdAt ||
       o.processed_at ||
       o.order_created_at ||
       o.date ||
@@ -160,321 +168,329 @@ export const OrderTable: React.FC<OrderTableProps> = ({
     return "Guest";
   };
 
-  const getTotalFormatted = (order: Order) => {
+  const getDisputeBadge = (order: Order) => {
     const o: any = order;
-    const currency = o.currency || "USD";
-    const raw =
-      o.total_price ||
-      o.total ||
-      o.current_total_price ||
-      o.subtotal_price ||
-      0;
-    const num = typeof raw === "number" ? raw : parseFloat(String(raw) || "0");
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(num);
-  };
-
-  const getDisputeStatus = (order: Order) => {
-    const o: any = order;
-    return o.dispute_status || "";
-  };
-
-  const getPaymentStatus = (order: Order) => {
-    const o: any = order;
-    return (
-      o.payment_status ||
-      (o.financial_status && String(o.financial_status).replace("_", " ")) ||
+    const disputeStatus = (
+      o.dispute_status ||
+      o.disputeStatus ||
       ""
-    );
-  };
-
-  const getFulfillmentStatus = (order: Order) => {
-    const o: any = order;
-    return (
-      o.fulfillment_status ||
-      (o.fulfillment_status_label &&
-        String(o.fulfillment_status_label).replace("_", " ")) ||
+    ).toLowerCase();
+    const importCategory = (
+      o.import_category ||
+      o.importCategory ||
       ""
-    );
+    ).toLowerCase();
+
+    // Won
+    if (
+      disputeStatus.includes("won") ||
+      importCategory.includes("dispute_won")
+    ) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+          Won
+        </span>
+      );
+    }
+
+    // Lost
+    if (
+      disputeStatus.includes("lost") ||
+      importCategory.includes("dispute_lost")
+    ) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-700 border border-zinc-200">
+          Lost
+        </span>
+      );
+    }
+
+    // Open / pending
+    if (
+      disputeStatus.includes("open") ||
+      disputeStatus.includes("pending") ||
+      disputeStatus.includes("action required") ||
+      importCategory.includes("dispute_open")
+    ) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+          Action required
+        </span>
+      );
+    }
+
+    // High-risk only
+    const riskFlag = (o.risk_category || o.riskCategory || "").toLowerCase();
+    const tags = (o.tags || "").toString().toLowerCase();
+    if (
+      riskFlag.includes("high") ||
+      tags.includes("fraud") ||
+      tags.includes("high risk")
+    ) {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+          High risk
+        </span>
+      );
+    }
+
+    return <span className="text-xs text-zinc-400">No dispute</span>;
   };
 
   const getTags = (order: Order) => {
     const o: any = order;
-    if (Array.isArray(o.tags)) return o.tags as string[];
-    if (typeof o.tags === "string") {
-      return o.tags
-        .split(",")
-        .map((t: string) => t.trim())
-        .filter(Boolean);
-    }
-    return [] as string[];
+    if (Array.isArray(o.tags)) return o.tags.join(", ");
+    return o.tags || "—";
   };
 
-  const isCsvImport = (order: Order) => {
+  const getChannel = (order: Order) => {
     const o: any = order;
-    return !!o.csv_source || !!o.is_csv;
+    return (
+      o.source_name ||
+      o.source ||
+      o.channel ||
+      o.order_source ||
+      "Online Store"
+    );
+  };
+
+  const getPayment = (order: Order) => {
+    const o: any = order;
+    const gateway =
+      o.gateway ||
+      o.payment_gateway_names ||
+      (o.payment &&
+        (o.payment.gateway || o.payment.payment_gateway_names));
+    const method = Array.isArray(gateway)
+      ? gateway.join(", ")
+      : gateway || "—";
+    const risk = (o.risk_category || o.riskCategory || "").toString();
+    if (risk && risk.toLowerCase().includes("high")) {
+      return `${method} · High risk`;
+    }
+    return method;
   };
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      {/* Card wrapper */}
-      <div className="flex-1 min-h-0 bg-white border border-zinc-200 rounded-lg flex flex-col overflow-hidden">
-        {/* Tabs row */}
-        <div className="border-b border-zinc-200 bg-[#fafafb] px-4 pt-3">
-          <div className="flex items-center justify-between">
-            <div className="flex gap-4 text-sm font-medium">
-              <button
-                type="button"
-                onClick={() => onTabChange("RISK")}
-                className={`pb-2 border-b-2 ${
-                  activeTab === "RISK"
-                    ? "border-zinc-900 text-zinc-900"
-                    : "border-transparent text-zinc-500 hover:text-zinc-800"
-                }`}
-              >
-                Fraud Monitoring
-                <span className="ml-2 inline-flex h-5 min-w-[24px] items-center justify-center rounded-full bg-zinc-200 text-[11px]">
-                  {riskCount}
-                </span>
-              </button>
+    <div className="bg-white rounded-lg shadow-sm border border-zinc-200 flex flex-col h-full overflow-hidden relative">
+      {/* Top info bar (Shopify vibes) */}
+      <div className="px-6 py-3 border-b border-zinc-200 bg-zinc-50 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2 text-xs text-zinc-600">
+          <AlertCircle className="w-4 h-4 text-amber-500" />
+          <span>
+            {total > 0 ? (
+              <>
+                <strong>{total}</strong> orders in this view. Use tags &
+                dispute status to narrow down.
+              </>
+            ) : (
+              <>No orders match this view yet.</>
+            )}
+          </span>
+        </div>
+      </div>
 
-              <button
-                type="button"
-                onClick={() => onTabChange("DISPUTES")}
-                className={`pb-2 border-b-2 ${
-                  activeTab === "DISPUTES"
-                    ? "border-zinc-900 text-zinc-900"
-                    : "border-transparent text-zinc-500 hover:text-zinc-800"
-                }`}
-              >
-                Chargeback Monitoring
-                <span className="ml-2 inline-flex h-5 min-w-[24px] items-center justify-center rounded-full bg-zinc-200 text-[11px]">
-                  {openCount}
-                </span>
-              </button>
+      {/* Tabs & actions */}
+      <div className="border-b border-zinc-200 px-6 pt-3 pb-2 bg-white/80">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-1">
+            {[
+              { id: "RISK" as TabType, label: "Fraud Monitoring" },
+              { id: "DISPUTES" as TabType, label: "Chargeback Monitoring" },
+              { id: "HISTORY" as TabType, label: "Won / Lost" },
+              { id: "ALL" as TabType, label: "All Orders" },
+            ].map((tab) => {
+              const isActive = activeTab === tab.id;
+              const count =
+                isActive
+                  ? filtered.length
+                  : undefined;
 
-              <button
-                type="button"
-                onClick={() => onTabChange("HISTORY")}
-                className={`pb-2 border-b-2 ${
-                  activeTab === "HISTORY"
-                    ? "border-zinc-900 text-zinc-900"
-                    : "border-transparent text-zinc-500 hover:text-zinc-800"
-                }`}
-              >
-                Won/Lost
-                <span className="ml-2 inline-flex h-5 min-w-[24px] items-center justify-center rounded-full bg-zinc-200 text-[11px]">
-                  {historyCount}
-                </span>
-              </button>
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => onTabChange(tab.id)}
+                  className={`relative px-3 py-1.5 text-xs font-medium rounded-md border ${
+                    isActive
+                      ? "bg-white border-zinc-300 text-zinc-900 shadow-[0_1px_0_rgba(15,23,42,0.06)]"
+                      : "bg-transparent border-transparent text-zinc-500 hover:bg-zinc-100"
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  {typeof count === "number" && (
+                    <span
+                      className={`ml-1 inline-flex items-center justify-center rounded-full px-1.5 min-w-[1.25rem] text-[10px] border ${
+                        isActive
+                          ? "bg-zinc-900 text-white border-zinc-900"
+                          : "bg-zinc-100 text-zinc-600 border-zinc-200"
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
-              <button
-                type="button"
-                onClick={() => onTabChange("ALL")}
-                className={`pb-2 border-b-2 ${
-                  activeTab === "ALL"
-                    ? "border-zinc-900 text-zinc-900"
-                    : "border-transparent text-zinc-500 hover:text-zinc-800"
-                }`}
-              >
-                All Orders
-                <span className="ml-2 inline-flex h-5 min-w-[24px] items-center justify-center rounded-full bg-zinc-200 text-[11px]">
-                  {allCount}
-                </span>
-              </button>
-            </div>
-
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-md bg-white hover:bg-zinc-50 text-zinc-700"
+            >
+              <Filter className="w-3 h-3" />
+              Filter orders…
+            </button>
             <button
               type="button"
               onClick={onRefresh}
-              className="text-xs text-zinc-500 hover:text-zinc-800"
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-md bg-white hover:bg-zinc-50 text-zinc-700"
             >
+              <RefreshCw className="w-3 h-3" />
               Refresh
             </button>
           </div>
         </div>
+      </div>
 
-        {/* Filter bar (UI only for now) */}
-        <div className="border-b border-zinc-200 px-4 py-3 bg-[#fafafb]">
-          <input
-            className="w-full max-w-sm rounded-md border border-zinc-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5"
-            placeholder="Filter orders…"
-            disabled
-          />
-        </div>
-
-        {/* Scrollable table area */}
+      {/* Main scrollable region */}
+      <div className="flex-1 flex flex-col min-h-0">
+        {/* SCROLL CONTAINER (vertical + horizontal) */}
         <div className="flex-1 min-h-0 overflow-auto">
-          <div className="min-w-[1200px]">
-            {total === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-sm text-zinc-500">
-                <div className="mb-3 rounded-full bg-zinc-100 p-3">
-                  <AlertCircle className="w-5 h-5 text-zinc-400" />
-                </div>
-                <div className="font-medium mb-1">
-                  No orders found in this view
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onTabChange("ALL")}
-                  className="mt-3 inline-flex items-center rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
-                >
-                  View All Orders
-                </button>
-              </div>
-            ) : (
-              <table className="w-full border-separate border-spacing-0 text-sm">
-                <thead className="bg-[#f7f7f8] text-xs uppercase text-zinc-500">
+          <div className="min-w-[1400px]">
+            <table className="w-full text-sm border-separate border-spacing-0 whitespace-nowrap">
+              <thead className="bg-[#f9fafb] text-xs text-zinc-500 border-b border-zinc-200">
+                <tr>
+                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left w-10 border-b border-zinc-200">
+                    <input type="checkbox" className="rounded border-zinc-300" />
+                  </th>
+                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                    Order
+                  </th>
+                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                    Date
+                  </th>
+                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                    Customer
+                  </th>
+                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                    Channel
+                  </th>
+                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                    Total
+                  </th>
+                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                    Dispute / Risk
+                  </th>
+                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                    Payment
+                  </th>
+                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                    Tags
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white">
+                {pageOrders.length === 0 ? (
                   <tr>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left w-[40px]">
-                      {/* checkbox header */}
-                    </th>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
-                      Order
-                    </th>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
-                      Date
-                    </th>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
-                      Customer
-                    </th>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-right">
-                      Total
-                    </th>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
-                      Dispute Status
-                    </th>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
-                      Payment
-                    </th>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
-                      Fulfillment
-                    </th>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
-                      Tags
-                    </th>
-                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-right">
-                      Action
-                    </th>
+                    <td
+                      colSpan={9}
+                      className="px-4 py-8 text-center text-sm text-zinc-500 border-t border-zinc-100"
+                    >
+                      No orders in this view.
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="bg-white">
-                  {pageOrders.map((order, idx) => {
+                ) : (
+                  pageOrders.map((order) => {
                     const o: any = order;
-                    const disputeStatus = getDisputeStatus(order);
-                    const tags = getTags(order);
-                    const highlight =
-                      isOpenDispute(order) || disputeStatus.toUpperCase().includes("ACTION");
-
                     return (
                       <tr
-                        key={o.id || o.order_id || getOrderName(order) || idx}
-                        className="hover:bg-[#fafafa]"
+                        key={order.id || o.name || Math.random().toString(36)}
+                        className="border-b border-zinc-100 hover:bg-zinc-50"
                       >
-                        <td className="px-4 py-3 border-b border-zinc-200 w-[40px]">
+                        <td className="px-4 py-2 align-middle">
                           <input
                             type="checkbox"
-                            className="h-4 w-4 rounded border-zinc-300"
+                            className="rounded border-zinc-300"
                           />
                         </td>
-
-                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm font-medium text-blue-600">
-                          {getOrderName(order)}
-                          {isCsvImport(order) && (
-                            <span className="ml-2 inline-flex items-center rounded border border-zinc-300 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
-                              CSV
-                            </span>
+                        <td className="px-4 py-2 align-middle text-[13px] text-zinc-900">
+                          <div className="font-medium">
+                            {getOrderName(order)}
+                          </div>
+                          {o.email && (
+                            <div className="text-[11px] text-zinc-500">
+                              {o.email}
+                            </div>
                           )}
                         </td>
-
-                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-600">
-                          {getCreated(order)}
+                        <td className="px-4 py-2 align-middle text-[13px] text-zinc-700">
+                          {getCreatedAt(order)}
                         </td>
-
-                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-700">
+                        <td className="px-4 py-2 align-middle text-[13px] text-zinc-700">
                           {getCustomer(order)}
                         </td>
-
-                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-700 text-right">
-                          {getTotalFormatted(order)}
+                        <td className="px-4 py-2 align-middle text-[13px] text-zinc-700">
+                          {getChannel(order)}
                         </td>
-
-                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap">
-                          {disputeStatus ? (
-                            <span
-                              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border ${
-                                highlight
-                                  ? "bg-rose-50 text-rose-700 border-rose-200"
-                                  : "bg-zinc-100 text-zinc-700 border-zinc-200"
-                              }`}
-                            >
-                              <AlertCircle className="w-3.5 h-3.5" />
-                              {disputeStatus}
-                            </span>
-                          ) : (
-                            <span className="text-xs text-zinc-400">—</span>
-                          )}
+                        <td className="px-4 py-2 align-middle text-[13px] text-zinc-900">
+                          {formatMoney(order)}
                         </td>
-
-                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-600">
-                          {getPaymentStatus(order) || "-"}
+                        <td className="px-4 py-2 align-middle">
+                          {getDisputeBadge(order)}
                         </td>
-
-                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-600">
-                          {getFulfillmentStatus(order) || "-"}
+                        <td className="px-4 py-2 align-middle text-[13px] text-zinc-700">
+                          {getPayment(order)}
                         </td>
-
-                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm">
-                          <div className="flex flex-wrap gap-1 max-w-[280px]">
-                            {tags.map((tag) => (
-                              <span
-                                key={tag}
-                                className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-700"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-
-                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-right text-xs text-blue-600">
-                          Review Data
+                        <td className="px-4 py-2 align-middle text-[12px] text-zinc-600 max-w-xs truncate">
+                          {getTags(order)}
                         </td>
                       </tr>
                     );
-                  })}
-                </tbody>
-              </table>
-            )}
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
-        {/* Footer: pagination summary */}
-        <div className="h-10 border-t border-zinc-200 bg-white px-4 flex items-center justify-between text-xs text-zinc-500">
+        {/* Footer (ALWAYS visible inside card, not inside scroll) */}
+        <div className="border-t border-zinc-200 bg-white px-4 py-2 flex items-center justify-between text-xs text-zinc-600 shrink-0">
           <div>
-            Showing {startIndex} – {endIndex} of {total} orders
+            Showing{" "}
+            <span className="font-medium">
+              {displayStart}–{displayEnd}
+            </span>{" "}
+            of <span className="font-medium">{total}</span> orders
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handlePrev}
-              disabled={currentPage === 1}
-              className="inline-flex h-7 w-7 items-center justify-center rounded border border-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-50"
+              disabled={safePage === 1}
+              className={`inline-flex items-center gap-1 px-2 py-1 border rounded-md text-xs ${
+                safePage === 1
+                  ? "border-zinc-200 text-zinc-400 cursor-not-allowed bg-zinc-50"
+                  : "border-zinc-300 text-zinc-700 bg-white hover:bg-zinc-50"
+              }`}
             >
               <ChevronLeft className="w-3 h-3" />
+              Prev
             </button>
-            <span>
-              Page {currentPage} of {totalPages}
+            <span className="text-[11px] text-zinc-500">
+              Page {safePage} of {totalPages}
             </span>
             <button
               type="button"
               onClick={handleNext}
-              disabled={currentPage === totalPages || total === 0}
-              className="inline-flex h-7 w-7 items-center justify-center rounded border border-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-50"
+              disabled={safePage === totalPages}
+              className={`inline-flex items-center gap-1 px-2 py-1 border rounded-md text-xs ${
+                safePage === totalPages
+                  ? "border-zinc-200 text-zinc-400 cursor-not-allowed bg-zinc-50"
+                  : "border-zinc-300 text-zinc-700 bg-white hover:bg-zinc-50"
+              }`}
             >
+              Next
               <ChevronRight className="w-3 h-3" />
             </button>
           </div>
