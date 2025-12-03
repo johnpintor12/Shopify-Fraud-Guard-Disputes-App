@@ -1,5 +1,6 @@
+// src/components/ClearDataButton.tsx
 import React, { useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, AlertTriangle } from 'lucide-react';
 import { clearAllImportedData } from '../services/storageService';
 
 interface ClearDataButtonProps {
@@ -14,8 +15,15 @@ const ClearDataButton: React.FC<ClearDataButtonProps> = ({ onCleared }) => {
     if (isClearing) return;
 
     const ok = window.confirm(
-      'This will delete ALL imported orders, disputes, and import history for your account.\n\nYour Shopify connection and settings will be kept.\n\nDo you want to continue?'
+      [
+        'This will delete ALL imported orders, disputes, and import history for your account.',
+        '',
+        'Your Shopify connection/settings will be kept.',
+        '',
+        'Do you want to continue?',
+      ].join('\n')
     );
+
     if (!ok) return;
 
     setIsClearing(true);
@@ -33,18 +41,24 @@ const ClearDataButton: React.FC<ClearDataButtonProps> = ({ onCleared }) => {
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-red-500 font-semibold">
+        <AlertTriangle className="w-3 h-3" />
+        <span>Danger zone</span>
+      </div>
+
       <button
         type="button"
         onClick={handleClick}
         disabled={isClearing}
-        className="inline-flex items-center gap-2 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60"
+        className="inline-flex items-center gap-2 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed shadow-sm"
       >
         <Trash2 className="h-4 w-4" />
         {isClearing ? 'Clearing…' : 'Clear Imported Data'}
       </button>
+
       {error && (
-        <p className="text-[10px] text-red-500">
+        <p className="text-[10px] text-red-500 max-w-[220px]">
           {error}
         </p>
       )}
