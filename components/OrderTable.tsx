@@ -37,13 +37,11 @@ export const OrderTable: React.FC<OrderTableProps> = ({
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   
-  // AI Modal State
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [generatedLetter, setGeneratedLetter] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
 
-  // Edit Modal State
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [editForm, setEditForm] = useState({ id: '', date: '', email: '', tags: '' });
 
@@ -158,7 +156,7 @@ export const OrderTable: React.FC<OrderTableProps> = ({
                         {order.import_error}
                     </span>
                 )}
-                {/* SHOW ORIGINAL TYPE IF AVAILABLE */}
+                {/* SHOW ORIGINAL TYPE */}
                 {order.original_category && (
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-50 text-blue-700 border border-blue-100 mt-0.5">
                         Type: {displayCategory}
