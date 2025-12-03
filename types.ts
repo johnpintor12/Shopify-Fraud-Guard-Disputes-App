@@ -1,5 +1,36 @@
-// src/types.ts
-// ... (keep existing enums and interfaces) ...
+export enum PaymentStatus {
+  PAID = 'Paid',
+  PENDING = 'Pending',
+  REFUNDED = 'Refunded',
+  VOIDED = 'Voided',
+  PARTIALLY_REFUNDED = 'Partially refunded'
+}
+
+export enum FulfillmentStatus {
+  FULFILLED = 'Fulfilled',
+  UNFULFILLED = 'Unfulfilled',
+  PARTIAL = 'Partial',
+  NULL = 'Unfulfilled'
+}
+
+export enum DeliveryStatus {
+  DELIVERED = 'Delivered',
+  IN_TRANSIT = 'In transit',
+  NO_STATUS = ''
+}
+
+// CRITICAL: This is the Enum that was missing and causing your error
+export enum DisputeStatus {
+  NONE = 'None',
+  NEEDS_RESPONSE = 'Needs Response',
+  UNDER_REVIEW = 'Under Review',
+  WON = 'Won',
+  LOST = 'Lost'
+}
+
+export type TabType = 'RISK' | 'DISPUTES' | 'HISTORY' | 'ALL';
+
+export type ImportCategory = 'AUTO' | 'RISK' | 'DISPUTE_OPEN' | 'DISPUTE_SUBMITTED' | 'DISPUTE_WON' | 'DISPUTE_LOST';
 
 export interface Customer {
   id: string;
@@ -19,7 +50,7 @@ export interface SavedDispute {
   created_at: string;
 }
 
-// NEW: Alert Interface for Database
+// New: Alert interface for the notification history
 export interface Alert {
   id: string;
   user_id?: string;
@@ -32,7 +63,6 @@ export interface Alert {
 }
 
 export interface Order {
-  // ... (keep existing Order fields) ...
   id: string; 
   date: string;
   customer: Customer;
@@ -47,12 +77,14 @@ export interface Order {
   isHighRisk: boolean;
   disputeStatus: DisputeStatus;
   disputeDeadline?: string;
+  
   savedDispute?: SavedDispute; 
   created_at?: string;
   currency?: string;
   source_name?: string;
   risk_category?: string;
   import_category?: string;
+  
   additional_data?: Record<string, any>;
 }
 
