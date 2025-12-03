@@ -1,4 +1,3 @@
-// src/types.ts
 export enum PaymentStatus {
   PAID = 'Paid',
   PENDING = 'Pending',
@@ -30,7 +29,7 @@ export enum DisputeStatus {
 
 export type TabType = 'RISK' | 'DISPUTES' | 'HISTORY' | 'ALL';
 
-export type ImportCategory = 'AUTO' | 'RISK' | 'DISPUTE_OPEN' | 'DISPUTE_WON' | 'DISPUTE_LOST';
+export type ImportCategory = 'AUTO' | 'RISK' | 'DISPUTE_OPEN' | 'DISPUTE_SUBMITTED' | 'DISPUTE_WON' | 'DISPUTE_LOST';
 
 export interface Customer {
   id: string;
@@ -38,7 +37,6 @@ export interface Customer {
   email: string;
   location: string;
   ordersCount: number;
-  // Added optional fields for better type safety
   first_name?: string;
   last_name?: string;
 }
@@ -53,7 +51,7 @@ export interface SavedDispute {
 
 export interface Order {
   id: string; 
-  date: string; // Display string (e.g. "Nov 23")
+  date: string;
   customer: Customer;
   channel: string;
   total: number;
@@ -67,13 +65,15 @@ export interface Order {
   disputeStatus: DisputeStatus;
   disputeDeadline?: string;
   
-  // Database/Optional fields enabling strict typing
   savedDispute?: SavedDispute; 
-  created_at?: string; // Raw timestamp
+  created_at?: string;
   currency?: string;
   source_name?: string;
   risk_category?: string;
   import_category?: string;
+  
+  // NEW: This holds any extra columns from your CSV (Dynamic Headers)
+  additional_data?: Record<string, any>;
 }
 
 export interface ShopifyCredentials {
