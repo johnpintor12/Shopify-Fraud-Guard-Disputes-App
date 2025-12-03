@@ -1,567 +1,346 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Order, DisputeStatus, TabType } from '../types';
-import {
-  Filter,
-  AlertOctagon,
-  ListFilter,
-  Save,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  FileText,
-  Eye,
-  Scale,
-  Clock,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
-} from 'lucide-react';
-import { generateChargebackResponse } from '../services/geminiService';
-import { saveDisputeDraft } from '../services/disputeService';
+// src/components/OrderTable.tsx
+import React, { useMemo, useState, useEffect } from 'react';
+import { Order, TabType, DisputeStatus } from '../types';
+import { AlertCircle, ArrowLeft, ArrowRight } from 'lucide-react';
 
 interface OrderTableProps {
   orders: Order[];
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
-  onRefresh?: () => void;
+  onRefresh: () => void;
 }
 
-export const OrderTable: React.FC<OrderTableProps> = ({
+const PAGE_SIZE = 50;
+
+const OrderTable: React.FC<OrderTableProps> = ({
   orders,
   activeTab,
   onTabChange,
   onRefresh,
 }) => {
-  const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
-  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
-  const [analysisResult, setAnalysisResult] = useState<{
-    id: string;
-    text: string;
-  } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [savedSuccess, setSavedSuccess] = useState(false);
+  const [page, setPage] = useState(1);
 
-  // Pagination State
-  const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 50;
-
-  // Reset pagination when tab changes
+  // Reset to first page when tab or data changes
   useEffect(() => {
-    setCurrentPage(1);
-  }, [activeTab]);
+    setPage(1);
+  }, [activeTab, orders]);
 
-  const toggleOrder = (id: string) => {
-    const newSelected = new Set(selectedOrders);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedOrders(newSelected);
-  };
+  // Categorise orders for counts
+  const {
+    riskCount,
+    openDisputesCount,
+    historyCount,
+    filteredOrders,
+  } = useMemo(() => {
+    let risk = 0;
+    let open = 0;
+    let history = 0;
 
-  const handleGenerateResponse = async (
-    e: React.MouseEvent,
-    order: Order
-  ) => {
-    e.stopPropagation();
+    const inRisk = (o: Order) =>
+      o.isHighRisk ||
+      (o.tags && o.tags.some((t) => t.toLowerCase().includes('fraud')));
 
-    // Check if we already have a saved draft locally
-    if (order.savedDispute) {
-      setAnalysisResult({
-        id: order.id,
-        text: order.savedDispute.rebuttal_text,
-      });
-      return;
-    }
+    const inOpenDisputes = (o: Order) =>
+      o.disputeStatus === DisputeStatus.NEEDS_RESPONSE ||
+      o.disputeStatus === DisputeStatus.UNDER_REVIEW;
 
-    setAnalyzingId(order.id);
-    const result = await generateChargebackResponse(order);
-    setAnalysisResult({ id: order.id, text: result });
-    setAnalyzingId(null);
-  };
+    const inHistory = (o: Order) =>
+      o.disputeStatus === DisputeStatus.WON ||
+      o.disputeStatus === DisputeStatus.LOST;
 
-  const handleSaveDraft = async () => {
-    if (!analysisResult) return;
-    setSaving(true);
-    try {
-      await saveDisputeDraft(analysisResult.id, analysisResult.text);
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 2000);
-      if (onRefresh) onRefresh(); // Refresh parent to get new DB status
-    } catch (err) {
-      alert('Failed to save draft to database.');
-      console.error(err);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const closeAnalysis = () => setAnalysisResult(null);
-
-  // Filter Logic
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      switch (activeTab) {
-        case 'RISK':
-          return (
-            order.isHighRisk ||
-            order.tags.some((t) => t.toLowerCase().includes('fraud')) ||
-            order.disputeStatus !== DisputeStatus.NONE
-          );
-        case 'DISPUTES':
-          return (
-            order.disputeStatus === DisputeStatus.NEEDS_RESPONSE ||
-            order.disputeStatus === DisputeStatus.UNDER_REVIEW ||
-            !!order.savedDispute
-          );
-        case 'HISTORY':
-          return (
-            order.disputeStatus === DisputeStatus.WON ||
-            order.disputeStatus === DisputeStatus.LOST
-          );
-        case 'ALL':
-        default:
-          return true;
-      }
+    orders.forEach((o) => {
+      if (inRisk(o)) risk++;
+      if (inOpenDisputes(o)) open++;
+      if (inHistory(o)) history++;
     });
+
+    let filtered: Order[] = orders;
+    switch (activeTab) {
+      case 'RISK':
+        filtered = orders.filter(inRisk);
+        break;
+      case 'DISPUTES':
+        filtered = orders.filter(inOpenDisputes);
+        break;
+      case 'HISTORY':
+        filtered = orders.filter(inHistory);
+        break;
+      case 'ALL':
+      default:
+        filtered = orders;
+        break;
+    }
+
+    return {
+      riskCount: risk,
+      openDisputesCount: open,
+      historyCount: history,
+      filteredOrders: filtered,
+    };
   }, [orders, activeTab]);
 
-  // Pagination Logic (50 rows per page)
-  const totalPages = Math.ceil(filteredOrders.length / ITEMS_PER_PAGE);
-  const paginatedOrders = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredOrders.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredOrders, currentPage]);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredOrders.length / PAGE_SIZE) || 1
+  );
+  const currentPage = Math.min(page, totalPages);
+  const startIndex = (currentPage - 1) * PAGE_SIZE;
+  const visibleOrders = filteredOrders.slice(
+    startIndex,
+    startIndex + PAGE_SIZE
+  );
 
-  const goToPage = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
+  const handlePrev = () => {
+    setPage((p) => Math.max(1, p - 1));
   };
 
-  // Counters
-  const counts = useMemo(() => {
-    return {
-      risk: orders.filter(
-        (o) =>
-          o.isHighRisk ||
-          o.tags.some((t) => t.toLowerCase().includes('fraud'))
-      ).length,
-      disputes: orders.filter(
-        (o) =>
-          o.disputeStatus === DisputeStatus.NEEDS_RESPONSE ||
-          o.disputeStatus === DisputeStatus.UNDER_REVIEW ||
-          !!o.savedDispute
-      ).length,
-      history: orders.filter(
-        (o) =>
-          o.disputeStatus === DisputeStatus.WON ||
-          o.disputeStatus === DisputeStatus.LOST
-      ).length,
-      urgent: orders.filter(
-        (o) => o.disputeStatus === DisputeStatus.NEEDS_RESPONSE
-      ).length,
-    };
-  }, [orders]);
-
-  const getDisputeBadge = (order: Order) => {
-    if (order.savedDispute) {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
-          <FileText className="w-3 h-3" /> Draft Saved
-        </span>
-      );
-    }
-
-    switch (order.disputeStatus) {
-      case DisputeStatus.NEEDS_RESPONSE:
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
-            <AlertTriangle className="w-3 h-3" /> Action Required
-          </span>
-        );
-      case DisputeStatus.UNDER_REVIEW:
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
-            <Clock className="w-3 h-3" /> Under Review
-          </span>
-        );
-      case DisputeStatus.WON:
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
-            <CheckCircle className="w-3 h-3" /> Won
-          </span>
-        );
-      case DisputeStatus.LOST:
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-600 border border-zinc-200">
-            <XCircle className="w-3 h-3" /> Lost
-          </span>
-        );
-      default:
-        return <span className="text-zinc-400">-</span>;
-    }
+  const handleNext = () => {
+    setPage((p) => Math.min(totalPages, p + 1));
   };
-
-  const tabs: { id: TabType; label: string; count?: number }[] = [
-    { id: 'RISK', label: 'Fraud Monitoring', count: counts.risk },
-    { id: 'DISPUTES', label: 'Chargeback Monitoring', count: counts.disputes },
-    { id: 'HISTORY', label: 'Won/Lost', count: counts.history },
-    { id: 'ALL', label: 'All Orders' },
-  ];
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-zinc-200 flex flex-col h-full overflow-hidden relative">
-      {/* Analysis Modal */}
-      {analysisResult && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm"
-          onClick={closeAnalysis}
+    <div className="flex flex-col h-full min-h-0">
+      {/* Sub-tabs (like Shopify Fraud & Disputes) */}
+      <div className="flex items-center gap-4 mb-3 border-b border-zinc-200 bg-white px-4 pt-2 pb-0 rounded-t-lg">
+        <button
+          type="button"
+          onClick={() => onTabChange('RISK')}
+          className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${
+            activeTab === 'RISK'
+              ? 'border-zinc-900 text-zinc-900'
+              : 'border-transparent text-zinc-500 hover:text-zinc-800'
+          }`}
         >
-          <div
-            className="bg-white rounded-xl shadow-2xl max-w-2xl w-full mx-4 border border-zinc-200 flex flex-col max-h-[90vh]"
-            onClick={(e) => e.stopPropagation()}
+          Fraud Monitoring
+          {riskCount > 0 && (
+            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-700">
+              {riskCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onTabChange('DISPUTES')}
+          className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${
+            activeTab === 'DISPUTES'
+              ? 'border-zinc-900 text-zinc-900'
+              : 'border-transparent text-zinc-500 hover:text-zinc-800'
+          }`}
+        >
+          Chargeback Monitoring
+          {openDisputesCount > 0 && (
+            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-700">
+              {openDisputesCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onTabChange('HISTORY')}
+          className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${
+            activeTab === 'HISTORY'
+              ? 'border-zinc-900 text-zinc-900'
+              : 'border-transparent text-zinc-500 hover:text-zinc-800'
+          }`}
+        >
+          Won / Lost
+          {historyCount > 0 && (
+            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-700">
+              {historyCount}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onTabChange('ALL')}
+          className={`px-3 py-2 text-xs font-medium border-b-2 -mb-px ${
+            activeTab === 'ALL'
+              ? 'border-zinc-900 text-zinc-900'
+              : 'border-transparent text-zinc-500 hover:text-zinc-800'
+          }`}
+        >
+          All Orders
+          {orders.length > 0 && (
+            <span className="ml-1 inline-flex items-center justify-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-700">
+              {orders.length}
+            </span>
+          )}
+        </button>
+
+        <div className="ml-auto flex items-center gap-3 pr-1">
+          <button
+            type="button"
+            onClick={onRefresh}
+            className="text-xs text-zinc-500 hover:text-zinc-800"
           >
-            <div className="p-6 border-b border-zinc-200 flex items-center justify-between bg-zinc-50 rounded-t-xl shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="bg-blue-600 p-2 rounded-lg">
-                  <Scale className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-zinc-900">
-                    Chargeback Rebuttal Draft
-                  </h3>
-                  <p className="text-xs text-zinc-500">
-                    {orders.find((o) => o.id === analysisResult.id)
-                      ?.savedDispute
-                      ? 'Loading saved draft...'
-                      : `Automated evidence gathering for Order ${analysisResult.id}`}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-6 overflow-y-auto flex-1 bg-white">
-              <textarea
-                className="w-full h-full min-h-[300px] p-4 border border-zinc-300 rounded-lg font-mono text-sm leading-relaxed focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                value={analysisResult.text}
-                onChange={(e) =>
-                  setAnalysisResult({
-                    ...analysisResult,
-                    text: e.target.value,
-                  })
-                }
-              />
-            </div>
-
-            <div className="p-4 border-t border-zinc-200 bg-zinc-50 rounded-b-xl flex justify-between items-center shrink-0">
-              <span className="text-xs text-zinc-500">
-                {savedSuccess ? 'Draft Saved!' : 'Review and edit before saving.'}
-              </span>
-              <div className="flex gap-3">
-                <button
-                  onClick={closeAnalysis}
-                  className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-50 shadow-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveDraft}
-                  disabled={saving}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium shadow-sm flex items-center gap-2 transition-colors ${
-                    savedSuccess
-                      ? 'bg-green-600 text-white border border-green-700'
-                      : 'bg-white border border-zinc-300 text-zinc-700 hover:bg-zinc-50'
-                  }`}
-                >
-                  {savedSuccess ? (
-                    <Check className="w-4 h-4" />
-                  ) : (
-                    <Save className="w-4 h-4" />
-                  )}
-                  {saving ? 'Saving...' : 'Save Draft'}
-                </button>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(analysisResult.text);
-                    closeAnalysis();
-                  }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm flex items-center gap-2"
-                >
-                  <FileText className="w-4 h-4" /> Copy & Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Header Section (Fixed) */}
-      <div className="flex-none bg-white z-20 border-b border-zinc-200">
-        {/* Urgent Action Banner */}
-        {counts.urgent > 0 && (
-          <div className="bg-red-50 border-b border-red-100 px-4 py-3 flex items-center gap-3">
-            <AlertOctagon className="w-5 h-5 text-red-600" />
-            <div className="flex-1">
-              <p className="text-sm font-semibold text-red-800">
-                {counts.urgent} Dispute
-                {counts.urgent !== 1 ? 's' : ''} require
-                {counts.urgent === 1 ? 's' : ''} your attention
-              </p>
-              <p className="text-xs text-red-600">
-                Response deadlines are approaching. Use the AI drafter to reply
-                quickly.
-              </p>
-            </div>
-            <button
-              onClick={() => onTabChange('DISPUTES')}
-              className="px-3 py-1.5 bg-white border border-red-200 text-red-700 text-xs font-medium rounded hover:bg-red-50 shadow-sm"
-            >
-              View Disputes
-            </button>
-          </div>
-        )}
-
-        {/* Tabs */}
-        <div className="flex overflow-x-auto bg-zinc-50/50">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'text-blue-600 border-blue-600 bg-white'
-                  : 'text-zinc-500 border-transparent hover:text-zinc-700 hover:bg-zinc-50'
-              }`}
-            >
-              {tab.label}
-              {tab.count !== undefined && (
-                <span
-                  className={`px-2 py-0.5 rounded-full text-xs ${
-                    activeTab === tab.id
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-zinc-200 text-zinc-600'
-                  }`}
-                >
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Filters Bar */}
-        <div className="p-3 flex items-center justify-between gap-4 bg-white">
-          <div className="relative flex-1 max-w-md">
-            <input
-              type="text"
-              placeholder="Filter orders..."
-              className="w-full pl-8 pr-4 py-1.5 text-sm border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm"
-            />
-            <Filter className="w-4 h-4 text-zinc-400 absolute left-2.5 top-2" />
-          </div>
+            Refresh
+          </button>
         </div>
       </div>
 
-      {/* Table Section (Scrollable Area) */}
-      <div className="flex-1 relative">
-        <div className="h-full w-full overflow-x-auto overflow-y-auto bg-white border-b border-zinc-200">
-          <table className="min-w-[1200px] text-left text-sm">
-            <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-600 font-medium sticky top-0 z-10 shadow-sm">
-              <tr>
-                <th className="p-3 w-10 text-center bg-zinc-50 sticky left-0 z-20 border-r border-zinc-200/50">
-                  <input
-                    type="checkbox"
-                    className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                  />
+      {/* Table container with horizontal & vertical scroll */}
+      <div className="flex-1 min-h-0 bg-white border border-zinc-200 rounded-b-lg rounded-t-none flex flex-col">
+        <div className="flex-1 overflow-auto">
+          <table className="min-w-[1200px] w-full text-sm">
+            <thead className="sticky top-0 z-10 bg-zinc-50 border-b border-zinc-200">
+              <tr className="text-xs text-zinc-500">
+                <th className="w-10 px-4 py-2 text-left">
+                  <input type="checkbox" disabled className="opacity-40" />
                 </th>
-                <th className="p-3 bg-zinc-50 font-medium">Order</th>
-                <th className="p-3 bg-zinc-50 font-medium">Date</th>
-                <th className="p-3 bg-zinc-50 font-medium">Customer</th>
-                <th className="p-3 bg-zinc-50 font-medium">Total</th>
-                <th className="p-3 bg-zinc-50 font-medium">Dispute Status</th>
-                <th className="p-3 bg-zinc-50 font-medium">Payment</th>
-                <th className="p-3 bg-zinc-50 font-medium">Fulfillment</th>
-                <th className="p-3 bg-zinc-50 font-medium">Tags</th>
-                <th className="p-3 text-right bg-zinc-50 font-medium">
-                  Action
+                <th className="px-4 py-2 text-left font-medium">Order</th>
+                <th className="px-4 py-2 text-left font-medium">Date</th>
+                <th className="px-4 py-2 text-left font-medium">Customer</th>
+                <th className="px-4 py-2 text-right font-medium">Total</th>
+                <th className="px-4 py-2 text-left font-medium">
+                  Dispute Status
                 </th>
+                <th className="px-4 py-2 text-left font-medium">
+                  Payment Status
+                </th>
+                <th className="px-4 py-2 text-left font-medium">Tags</th>
+                <th className="px-4 py-2 text-left font-medium">Risk</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 bg-white">
-              {paginatedOrders.length > 0 ? (
-                paginatedOrders.map((order) => (
-                  <tr
-                    key={order.id}
-                    className={`group hover:bg-zinc-50 transition-colors ${
-                      selectedOrders.has(order.id) ? 'bg-zinc-50' : ''
-                    }`}
-                    onClick={() => toggleOrder(order.id)}
-                  >
-                    <td
-                      className="p-3 text-center sticky left-0 bg-white group-hover:bg-zinc-50 border-r border-zinc-100 z-10"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedOrders.has(order.id)}
-                        onChange={() => toggleOrder(order.id)}
-                        className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                      />
-                    </td>
-                    <td className="p-3 font-semibold text-zinc-900">
-                      <div className="flex items-center gap-2">
-                        {order.id}
-                        {order.channel === 'CSV Import' && (
-                          <span className="text-[10px] bg-zinc-100 text-zinc-500 px-1 rounded border border-zinc-200">
-                            CSV
-                          </span>
-                        )}
-                        {order.isHighRisk && (
-                          <div
-                            className="w-2 h-2 rounded-full bg-red-500"
-                            title="Flagged High Risk by Shopify"
-                          ></div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="p-3 text-zinc-500 whitespace-nowrap">
-                      {order.date}
-                    </td>
-                    <td className="p-3 text-zinc-900 whitespace-nowrap">
-                      {order.customer.name}
-                    </td>
-                    <td className="p-3 text-zinc-900 text-right whitespace-nowrap">
-                      ${order.total.toFixed(2)}
-                    </td>
-                    <td className="p-3">
-                      <div className="flex flex-col">
-                        {getDisputeBadge(order)}
-                        {order.disputeDeadline && !order.savedDispute && (
-                          <span className="text-[10px] text-red-600 font-medium mt-1">
-                            {order.disputeDeadline}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="p-3 text-zinc-500">
-                      {order.paymentStatus}
-                    </td>
-                    <td className="p-3 text-zinc-500">
-                      {order.fulfillmentStatus}
-                    </td>
-                    <td className="p-3">
-                      <div className="flex flex-wrap gap-1">
-                        {order.tags.length > 0 ? (
-                          order.tags.map((tag) => (
-                            <span
-                              key={tag}
-                              className="px-2 py-0.5 bg-zinc-100 border border-zinc-200 rounded text-xs text-zinc-600"
-                            >
-                              {tag}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-zinc-300 text-xs italic">
-                            No tags
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="p-3 text-right">
-                      {order.disputeStatus ===
-                        DisputeStatus.NEEDS_RESPONSE ||
-                      order.savedDispute ? (
-                        <button
-                          className={`text-xs px-3 py-1.5 rounded-md border shadow-sm flex items-center gap-1 ml-auto ${
-                            order.savedDispute
-                              ? 'border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100'
-                              : 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
-                          }`}
-                          onClick={(e) => handleGenerateResponse(e, order)}
-                          disabled={analyzingId === order.id}
-                        >
-                          {analyzingId === order.id ? (
-                            <span className="animate-pulse">Loading...</span>
-                          ) : (
-                            <>
-                              <FileText className="w-3 h-3" />
-                              {order.savedDispute
-                                ? 'Edit Rebuttal'
-                                : 'Draft Rebuttal'}
-                            </>
-                          )}
-                        </button>
-                      ) : (
-                        <button className="text-xs px-3 py-1.5 rounded-md border border-zinc-300 text-zinc-600 hover:bg-zinc-50 flex items-center gap-1 ml-auto">
-                          <Eye className="w-3 h-3" /> Details
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              ) : (
+            <tbody>
+              {visibleOrders.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="p-12 text-center text-zinc-500">
-                    <div className="flex flex-col items-center justify-center">
-                      <div className="w-12 h-12 bg-zinc-100 rounded-full flex items-center justify-center mb-3 text-zinc-400">
-                        <ListFilter className="w-6 h-6" />
-                      </div>
-                      <p className="font-medium text-zinc-900">
-                        No orders found in this view
-                      </p>
-                      <div className="flex gap-3 mt-4">
-                        {activeTab !== 'ALL' && (
-                          <button
-                            onClick={() => onTabChange('ALL')}
-                            className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-50 shadow-sm"
-                          >
-                            View All Orders
-                          </button>
-                        )}
-                      </div>
+                  <td
+                    colSpan={9}
+                    className="px-4 py-10 text-center text-sm text-zinc-500"
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <AlertCircle className="w-5 h-5 text-zinc-400" />
+                      <span>No orders in this view yet.</span>
                     </div>
                   </td>
                 </tr>
               )}
+
+              {visibleOrders.map((order) => (
+                <tr
+                  key={order.id}
+                  className="border-b border-zinc-100 hover:bg-zinc-50/60"
+                >
+                  <td className="px-4 py-3 align-middle">
+                    <input type="checkbox" className="rounded border-zinc-300" />
+                  </td>
+                  <td className="px-4 py-3 align-middle whitespace-nowrap">
+                    <span className="font-medium text-zinc-900">
+                      {order.name || order.id}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 align-middle whitespace-nowrap text-zinc-500">
+                    {order.createdAtFormatted || order.createdAt || '-'}
+                  </td>
+                  <td className="px-4 py-3 align-middle whitespace-nowrap text-zinc-700">
+                    {order.customerName || order.customer_email || 'Guest'}
+                  </td>
+                  <td className="px-4 py-3 align-middle whitespace-nowrap text-right">
+                    <span className="font-medium text-zinc-900">
+                      {order.currency || '$'}
+                      {Number(order.totalPrice || order.total_price || 0).toFixed(
+                        2
+                      )}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 align-middle whitespace-nowrap">
+                    {order.disputeStatus === DisputeStatus.NEEDS_RESPONSE && (
+                      <span className="inline-flex items-center rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 border border-red-200">
+                        Action Required
+                      </span>
+                    )}
+                    {order.disputeStatus === DisputeStatus.UNDER_REVIEW && (
+                      <span className="inline-flex items-center rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700 border border-orange-200">
+                        Under Review
+                      </span>
+                    )}
+                    {order.disputeStatus === DisputeStatus.WON && (
+                      <span className="inline-flex items-center rounded-full bg-green-50 px-3 py-1 text-xs font-semibold text-green-700 border border-green-200">
+                        Won
+                      </span>
+                    )}
+                    {order.disputeStatus === DisputeStatus.LOST && (
+                      <span className="inline-flex items-center rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700 border border-zinc-200">
+                        Lost
+                      </span>
+                    )}
+                    {order.disputeStatus === DisputeStatus.NONE && (
+                      <span className="text-xs text-zinc-400">No dispute</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 align-middle whitespace-nowrap text-zinc-600">
+                    {order.financialStatus || order.financial_status || 'Paid'}
+                  </td>
+                  <td className="px-4 py-3 align-middle whitespace-nowrap text-xs text-zinc-500 max-w-xs">
+                    {order.tags && order.tags.length > 0
+                      ? order.tags.join(', ')
+                      : '—'}
+                  </td>
+                  <td className="px-4 py-3 align-middle whitespace-nowrap">
+                    {order.isHighRisk ? (
+                      <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-0.5 text-[11px] font-semibold text-red-700 border border-red-200">
+                        High Risk
+                      </span>
+                    ) : (
+                      <span className="text-xs text-zinc-400">Normal</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
 
-      {/* Pagination Footer - Fixed at bottom of table container */}
-      <div className="flex-none p-3 bg-zinc-50 flex items-center justify-between z-20 border-t border-zinc-200">
-        <div className="text-xs text-zinc-500">
-          Showing{' '}
-          {filteredOrders.length > 0
-            ? (currentPage - 1) * ITEMS_PER_PAGE + 1
-            : 0}{' '}
-          - {Math.min(currentPage * ITEMS_PER_PAGE, filteredOrders.length)} of{' '}
-          {filteredOrders.length} orders
-        </div>
-        {filteredOrders.length > 0 && (
+        {/* Pagination footer */}
+        <div className="flex items-center justify-between px-4 py-2 border-t border-zinc-200 text-xs text-zinc-600">
+          <div>
+            Showing{' '}
+            <span className="font-semibold">
+              {filteredOrders.length === 0
+                ? 0
+                : startIndex + 1}{' '}
+              –
+              {' '}
+              {Math.min(startIndex + PAGE_SIZE, filteredOrders.length)}
+            </span>{' '}
+            of{' '}
+            <span className="font-semibold">
+              {filteredOrders.length}
+            </span>{' '}
+            orders
+          </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => goToPage(currentPage - 1)}
+              type="button"
+              onClick={handlePrev}
               disabled={currentPage === 1}
-              className="p-1.5 rounded-md border border-zinc-300 bg-white text-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-50"
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3 h-3" />
+              Prev
             </button>
-            <span className="text-sm font-medium text-zinc-700">
-              Page {currentPage} of {totalPages || 1}
+            <span className="text-[11px] text-zinc-500">
+              Page{' '}
+              <span className="font-semibold">{currentPage}</span> of{' '}
+              <span className="font-semibold">{totalPages}</span>
             </span>
             <button
-              onClick={() => goToPage(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="p-1.5 rounded-md border border-zinc-300 bg-white text-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-50"
+              type="button"
+              onClick={handleNext}
+              disabled={currentPage >= totalPages}
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <ChevronRight className="w-4 h-4" />
+              Next
+              <ArrowRight className="w-3 h-3" />
             </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
 };
+
+export { OrderTable };
