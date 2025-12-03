@@ -11,7 +11,7 @@ import {
   Copy,
   Check,
   AlertTriangle,
-  ScanSearch // New Icon
+  ScanSearch
 } from "lucide-react";
 import { generateChargebackResponse } from "../services/geminiService";
 
@@ -19,7 +19,7 @@ interface OrderTableProps {
   orders: Order[];
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
-  onValidate: () => void; // CHANGED: Replaced onRefresh
+  onValidate: () => void;
 }
 
 const ROWS_PER_PAGE = 50;
@@ -28,7 +28,7 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   orders,
   activeTab,
   onTabChange,
-  onValidate, // Updated Prop
+  onValidate,
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   
@@ -136,14 +136,16 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   };
 
   const getDisputeBadge = (order: Order) => {
+    // 1. INVALID DATA BADGE (with text wrap)
     if (order.import_category === 'INVALID') {
         return (
-            <div className="flex flex-col items-start gap-1">
+            // Added 'whitespace-normal' and 'max-w-[220px]' to force wrapping within a limit
+            <div className="flex flex-col items-start gap-1 whitespace-normal max-w-[220px]">
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
-                    <AlertTriangle className="w-3 h-3" /> Invalid Data
+                    <AlertTriangle className="w-3 h-3 shrink-0" /> Invalid Data
                 </span>
                 {order.import_error && (
-                    <span className="text-[10px] text-red-600 max-w-[120px] leading-tight">
+                    <span className="text-[10px] text-red-600 leading-tight break-words">
                         {order.import_error}
                     </span>
                 )}
@@ -236,9 +238,8 @@ export const OrderTable: React.FC<OrderTableProps> = ({
               { id: "DISPUTES" as TabType, label: "Chargeback Monitoring" },
               { id: "HISTORY" as TabType, label: "Won / Lost" },
               { id: "ALL" as TabType, label: "All Orders" },
-              { id: "QUARANTINE" as TabType, label: "Data Issues" }, // Make sure this is in tabs if used
+              { id: "QUARANTINE" as TabType, label: "Data Issues" },
             ].map((tab) => {
-              // Hide Quarantine if not needed, handled in Sidebar normally but good to have safety here
               if (tab.id === 'QUARANTINE' && !orders.some(o => o.import_category === 'INVALID')) return null;
 
               const isActive = activeTab === tab.id;
@@ -270,7 +271,6 @@ export const OrderTable: React.FC<OrderTableProps> = ({
             <button className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-md bg-white hover:bg-zinc-50 text-zinc-700">
               <Filter className="w-3 h-3" /> Filter
             </button>
-            {/* UPDATED: VALIDATE BUTTON */}
             <button 
               onClick={onValidate} 
               className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-md bg-white hover:bg-zinc-50 text-blue-700 font-medium"
