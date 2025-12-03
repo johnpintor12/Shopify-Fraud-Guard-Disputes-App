@@ -47,7 +47,7 @@ const mapFulfillmentStatus = (status: string): FulfillmentStatus => {
 // Validation Helpers
 const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const isValidDate = (dateStr: string) => !isNaN(Date.parse(dateStr));
-const hasNumbers = (str: string) => /\d/.test(str); // Checks if string contains at least one digit
+const hasNumbers = (str: string) => /\d/.test(str); 
 
 export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUTO'): Order[] => {
   const lines = csvText.trim().split('\n');
@@ -95,7 +95,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
 
     const errorReasons: string[] = [];
 
-    // 1. ID Check (Must be numbers or #1234)
+    // 1. ID Check
     if (!rawId || !hasNumbers(rawId)) {
         errorReasons.push("Invalid Order #");
     }
@@ -110,14 +110,13 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
         errorReasons.push("Invalid Email");
     }
 
-    // 4. Tag Check (No tags = Bad data for this app)
-    if (!rawTags || rawTags.trim().length === 0) {
+    // 4. Tag Check
+    // FIX: If user manually selected a category (NOT Auto), we allow missing tags.
+    if (category === 'AUTO' && (!rawTags || rawTags.trim().length === 0)) {
         errorReasons.push("Missing Tags");
     }
 
     const isRowInvalid = errorReasons.length > 0;
-    
-    // Create ID for map (use "BAD-ROW-X" if ID is missing so we don't lose the row)
     const mapId = rawId || `BAD-ROW-${i}`;
 
     const extraData: Record<string, string> = {};
@@ -126,7 +125,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
     });
 
     if (!orderMap.has(mapId)) {
-      const tagsList = rawTags.split(',').map(t => t.trim().replace(/^"|"$/g, '')).filter(t => t);
+      const tagsList = rawTags ? rawTags.split(',').map(t => t.trim().replace(/^"|"$/g, '')).filter(t => t) : [];
       const csvRisk = val(idx.riskLevel).toLowerCase();
       const isNativeHighRisk = csvRisk === 'high' || csvRisk === 'medium';
 
@@ -151,7 +150,6 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
         itemsCount: 0,
         isCancelled: !!val(idx.cancelReason),
         additional_data: extraData,
-        // Validation Flags
         isInvalid: isRowInvalid,
         importError: errorReasons.join(', ')
       });
@@ -163,37 +161,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
   }
 
   return Array.from(orderMap.values()).map(o => {
-    // If flagged invalid, return immediately as QUARANTINE item
-    if (o.isInvalid) {
-        return {
-            id: o.id,
-            date: o.date,
-            created_at: new Date().toISOString(), // Fallback for sorting
-            customer: {
-                id: o.email,
-                name: o.customerName,
-                email: o.email,
-                location: o.location,
-                ordersCount: 0
-            },
-            channel: 'Import Error',
-            total: o.total,
-            currency: o.currency,
-            paymentStatus: PaymentStatus.PENDING,
-            fulfillmentStatus: FulfillmentStatus.UNFULFILLED,
-            itemsCount: o.itemsCount,
-            deliveryStatus: DeliveryStatus.NO_STATUS,
-            deliveryMethod: 'Unknown',
-            tags: ['INVALID'],
-            isHighRisk: false,
-            disputeStatus: DisputeStatus.NONE,
-            import_category: 'INVALID',
-            import_error: o.importError, // Pass the specific reasons
-            additional_data: o.additional_data
-        };
-    }
-
-    // --- NORMAL PROCESSING (Only runs if data is valid) ---
+    // --- DETERMINE CATEGORY FIRST (Even if Invalid) ---
     const lowerTags = o.tags.map((t: string) => t.toLowerCase());
     let disputeStatus = DisputeStatus.NONE;
     let isHighRisk = o.nativeRisk;
@@ -217,6 +185,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
         isHighRisk = true;
         injectedTag = 'Import: Fraud';
     } else {
+        // AUTO DETECT
         if (lowerTags.some((t: string) => t.includes('won'))) {
             disputeStatus = DisputeStatus.WON;
             importCat = 'DISPUTE_WON';
@@ -239,6 +208,40 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
     const finalTags = [...o.tags];
     if (injectedTag && !finalTags.includes(injectedTag)) {
         finalTags.push(injectedTag);
+    }
+
+    // --- NOW HANDLE INVALID STATE ---
+    if (o.isInvalid) {
+        return {
+            id: o.id,
+            date: o.date,
+            created_at: new Date().toISOString(), 
+            customer: {
+                id: o.email,
+                name: o.customerName,
+                email: o.email,
+                location: o.location,
+                ordersCount: 0
+            },
+            channel: 'Import Error',
+            total: o.total,
+            currency: o.currency,
+            paymentStatus: PaymentStatus.PENDING,
+            fulfillmentStatus: FulfillmentStatus.UNFULFILLED,
+            itemsCount: o.itemsCount,
+            deliveryStatus: DeliveryStatus.NO_STATUS,
+            deliveryMethod: 'Unknown',
+            tags: finalTags,
+            isHighRisk: false,
+            disputeStatus: DisputeStatus.NONE,
+            import_category: 'INVALID',
+            
+            // KEY CHANGE: Save the calculated category here!
+            original_category: importCat, 
+            
+            import_error: o.importError, 
+            additional_data: o.additional_data
+        };
     }
 
     return {
