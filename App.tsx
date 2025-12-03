@@ -9,6 +9,7 @@ import { parseShopifyCSV } from './services/csvService';
 import { supabase } from './lib/supabase';
 import { fetchSavedDisputes, fetchUserProfile, saveUserProfile } from './services/disputeService';
 import { loadOrdersFromDb, saveOrdersToDb } from './services/storageService';
+import { ClearDataButton } from './components/ClearDataButton';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
