@@ -525,7 +525,7 @@ const App: React.FC = () => {
           </div>
 
           {/* Table Container */}
-          <div className="flex-1 min-h-0 relative flex flex-col bg-white rounded-lg shadow-sm border border-zinc-200 overflow-hidden">
+<div className="flex-1 min-h-0 relative flex flex-col bg-white rounded-lg shadow-sm border border-zinc-200 overflow-hidden">
             {loading && orders.length === 0 ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm z-10">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900"></div>
@@ -538,7 +538,9 @@ const App: React.FC = () => {
                 orders={orders}
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
-                onRefresh={handleRefresh}
+                // CHANGED: We now pass handleRevalidate here
+                onValidate={handleRevalidate} 
+                onRefresh={handleRefresh} // Kept for future flexibility, but UI button now triggers Validate
               />
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
