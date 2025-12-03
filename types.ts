@@ -83,7 +83,7 @@ export interface Order {
   risk_category?: string;
   import_category?: string;
   
-  // NEW: Remembers what the order WAS before it became INVALID
+  // Remembers what the order WAS before it became INVALID
   original_category?: string; 
   
   additional_data?: Record<string, any>;
