@@ -48,12 +48,10 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
   const lines = csvText.trim().split('\n');
   if (lines.length < 2) throw new Error("CSV file is empty or invalid.");
 
-  // Normalize headers
   const rawHeaders = parseCSVLine(lines[0]);
   const headers = rawHeaders.map(h => h.trim().toLowerCase());
   const getIndex = (name: string) => headers.indexOf(name.toLowerCase());
   
-  // Standard Columns Map
   const idx = {
     name: getIndex('Name'),
     createdAt: getIndex('Created at'),
@@ -77,7 +75,6 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
 
   const orderMap = new Map<string, any>();
 
-  // Parse rows
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
@@ -85,49 +82,53 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
     const row = parseCSVLine(line);
     const val = (index: number) => (row[index] ? row[index].trim() : '');
 
-    const id = val(idx.name);
-    if (!id) continue;
+    // CHECK: Does this row have a valid ID?
+    let id = val(idx.name);
+    let isInvalid = false;
+    let importError = '';
 
-    // Capture ALL extra columns for flexibility
+    // If ID is missing, we create a fake one to capture the bad data
+    if (!id) {
+        id = `BAD-DATA-ROW-${i}`;
+        isInvalid = true;
+        importError = 'Missing Order ID';
+    }
+
     const extraData: Record<string, string> = {};
     rawHeaders.forEach((header, index) => {
-        // Skip the standard mapped columns to avoid duplication, or keep everything
-        // Here we just keep everything in 'additional_data' for safety
         extraData[header] = val(index);
     });
 
     if (!orderMap.has(id)) {
       const tagsString = val(idx.tags);
       const tagsList = tagsString.split(',').map(t => t.trim().replace(/^"|"$/g, '')).filter(t => t);
-      
       const csvRisk = val(idx.riskLevel).toLowerCase();
       const isNativeHighRisk = csvRisk === 'high' || csvRisk === 'medium';
 
-      const shippingCity = val(idx.shippingCity);
-      const shippingProv = val(idx.shippingProvince);
-      const shippingCountry = val(idx.shippingCountry);
-
       let location = 'Unknown';
-      if (shippingCity || shippingProv || shippingCountry) {
-        location = [shippingCity, shippingProv, shippingCountry].filter(Boolean).join(', ');
-      }
+      const city = val(idx.shippingCity);
+      const country = val(idx.shippingCountry);
+      if (city || country) location = [city, country].filter(Boolean).join(', ');
 
       orderMap.set(id, {
         id,
-        date: val(idx.createdAt),
-        email: val(idx.email),
+        date: val(idx.createdAt) || 'Unknown Date',
+        email: val(idx.email) || 'No Email',
         financial: val(idx.financial),
         fulfillment: val(idx.fulfillment),
         total: parseFloat(val(idx.total) || '0'),
         currency: val(idx.currency) || 'USD',
         tags: tagsList,
         nativeRisk: isNativeHighRisk,
-        customerName: val(idx.shippingName) || 'Guest',
+        customerName: val(idx.shippingName) || 'Unknown Guest',
         location: location,
         shippingMethod: val(idx.shippingMethod),
         itemsCount: 0,
         isCancelled: !!val(idx.cancelReason),
-        additional_data: extraData // Store the full raw CSV row here
+        additional_data: extraData,
+        // Error tracking
+        isInvalid: isInvalid,
+        importError: importError
       });
     }
 
@@ -137,14 +138,43 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
   }
 
   return Array.from(orderMap.values()).map(o => {
+    // If tagged as Invalid during parsing, force it
+    if (o.isInvalid) {
+        return {
+            id: o.id,
+            date: o.date,
+            created_at: o.date,
+            customer: {
+                id: o.email,
+                name: o.customerName,
+                email: o.email,
+                location: o.location,
+                ordersCount: 0
+            },
+            channel: 'Import Error',
+            total: o.total,
+            currency: o.currency,
+            paymentStatus: PaymentStatus.PENDING,
+            fulfillmentStatus: FulfillmentStatus.UNFULFILLED,
+            itemsCount: o.itemsCount,
+            deliveryStatus: DeliveryStatus.NO_STATUS,
+            deliveryMethod: 'Unknown',
+            tags: ['INVALID DATA'],
+            isHighRisk: false,
+            disputeStatus: DisputeStatus.NONE,
+            import_category: 'INVALID',
+            import_error: o.importError,
+            additional_data: o.additional_data
+        };
+    }
+
+    // Normal Processing
     const lowerTags = o.tags.map((t: string) => t.toLowerCase());
-    
     let disputeStatus = DisputeStatus.NONE;
     let isHighRisk = o.nativeRisk;
     let importCat = category; 
     let injectedTag = '';
 
-    // Logic: Force Categories
     if (category === 'DISPUTE_OPEN') {
         disputeStatus = DisputeStatus.NEEDS_RESPONSE;
         isHighRisk = true; 
@@ -162,7 +192,6 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
         isHighRisk = true;
         injectedTag = 'Import: Fraud';
     } else {
-        // Auto Detect
         if (lowerTags.some((t: string) => t.includes('won'))) {
             disputeStatus = DisputeStatus.WON;
             importCat = 'DISPUTE_WON';
@@ -212,7 +241,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
       disputeStatus: disputeStatus,
       disputeDeadline: disputeStatus === DisputeStatus.NEEDS_RESPONSE ? 'Review CSV Data' : undefined,
       import_category: importCat,
-      additional_data: o.additional_data // Saves the raw extra columns to DB
+      additional_data: o.additional_data
     };
   });
 };
