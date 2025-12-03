@@ -1,9 +1,7 @@
-// src/components/Sidebar.tsx
 import React from 'react';
 import {
   ShieldAlert,
   AlertOctagon,
-  Clock,
   CheckCircle2,
   ListChecks,
   Settings,
@@ -15,7 +13,7 @@ interface SidebarProps {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
   onOpenSettings: () => void;
-  onClearData: () => void; // calls setOrders([]) in App
+  onClearData: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -48,9 +46,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
+    // h-full ensures it stretches. flex-col allows pushing content to bottom.
     <aside className="w-64 bg-white border-r border-zinc-200 flex flex-col h-full shrink-0">
       {/* Brand / Title */}
-      <div className="h-14 px-4 flex items-center border-b border-zinc-200">
+      <div className="h-14 px-4 flex items-center border-b border-zinc-200 shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-xl bg-zinc-900 text-white flex items-center justify-center text-xs font-bold">
             FG
@@ -93,22 +92,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             );
           })}
         </div>
-
-        {/* Settings */}
-        <div className="mt-6 pt-4 border-t border-zinc-100">
-          <button
-            type="button"
-            onClick={onOpenSettings}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-md border border-zinc-200 text-sm text-zinc-700 hover:bg-zinc-50"
-          >
-            <Settings className="w-4 h-4" />
-            <span>Store Settings</span>
-          </button>
-        </div>
       </nav>
 
-      {/* Danger Zone at bottom */}
-      <div className="px-3 py-4 border-t border-zinc-100 bg-zinc-50">
+      {/* DANGER ZONE: This div stays at the bottom because of flex-col + flex-1 above */}
+      <div className="px-3 py-4 border-t border-zinc-100 bg-zinc-50 shrink-0">
         <ClearDataButton onCleared={onClearData} />
       </div>
     </aside>
