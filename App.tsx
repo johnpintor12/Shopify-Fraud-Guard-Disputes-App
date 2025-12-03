@@ -600,21 +600,24 @@ const App: React.FC = () => {
             </div>
 
             {/* Main Content Area - Scroll is handled inside OrderTable now */}
-            <div className="flex-1 min-h-0 relative flex flex-col">
-              {loading && orders.length === 0 ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm z-10 rounded-lg">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900"></div>
-                  <p className="text-zinc-500 text-sm mt-3">Syncing...</p>
-                </div>
-              ) : null}
+<div className="flex-1 min-h-0 flex flex-col overflow-hidden">  
+  {/* Loading overlay */}
+  {loading && orders.length === 0 ? (
+    <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm z-10 rounded-lg">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900"></div>
+      <p className="text-zinc-500 text-sm mt-3">Syncing...</p>
+    </div>
+  ) : null}
 
-              {orders.length > 0 || loading ? (
-                <OrderTable
-                  orders={orders}
-                  activeTab={activeTab}
-                  onTabChange={setActiveTab}
-                  onRefresh={handleRefresh}
-                />
+  <div className="flex-1 min-h-0">
+    <OrderTable
+      orders={orders}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+      onRefresh={handleRefresh}
+    />
+  </div>
+</div>
               ) : (
                 <div className="text-center py-12 bg-white rounded-lg border border-zinc-200 border-dashed mt-8">
                   <p className="text-zinc-500 mb-3">
