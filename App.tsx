@@ -30,7 +30,6 @@ const App: React.FC = () => {
   // CSV Import State
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  // Default was AUTO in this version
   const [importCategory, setImportCategory] = useState<ImportCategory>('AUTO');
 
   // 1. Auth & Session Management
@@ -95,6 +94,7 @@ const App: React.FC = () => {
           return saved ? { ...order, savedDispute: saved } : order;
         });
 
+        // THIS IS WHERE IT SAVES TO SUPABASE PERMANENTLY
         await saveOrdersToDb(mergedOrders);
 
         setOrders(mergedOrders);
@@ -166,7 +166,6 @@ const App: React.FC = () => {
             <p className="text-sm text-zinc-600 mb-4">How should we classify the orders in this file?</p>
 
             <div className="space-y-3 mb-6">
-              {/* AUTO DETECT OPTION */}
               <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'AUTO' ? 'border-blue-500 bg-blue-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
                 <input type="radio" name="cat" checked={importCategory === 'AUTO'} onChange={() => setImportCategory('AUTO')} className="text-blue-600" />
                 <div className="flex-1">
@@ -238,7 +237,7 @@ const App: React.FC = () => {
         {/* Header */}
         <header className="h-14 flex-none bg-white border-b border-zinc-200 flex items-center justify-between px-6 z-20">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-zinc-800 text-red-600">Dispute Management v2</h1>
+            <h1 className="text-lg font-bold text-zinc-800">Dispute Management</h1>
             <span className="px-2 py-0.5 bg-zinc-100 text-zinc-600 text-xs rounded-full font-medium border border-zinc-200 flex items-center gap-1">
                Offline / CSV Mode
             </span>
