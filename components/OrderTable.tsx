@@ -272,16 +272,17 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-zinc-200 flex flex-col h-full overflow-hidden relative">
-      {/* Top info bar (Shopify vibes) */}
-      <div className="px-6 py-3 border-b border-zinc-200 bg-zinc-50 flex items-center justify-between gap-4">
+    // REQUIREMENT: flex flex-col h-full (fills the parent card container)
+    <div className="flex flex-col h-full w-full relative">
+      
+      {/* --- FIXED HEADER SECTION (Tabs) --- */}
+      <div className="flex-none border-b border-zinc-200 bg-zinc-50 px-6 py-3">
         <div className="flex items-center gap-2 text-xs text-zinc-600">
           <AlertCircle className="w-4 h-4 text-amber-500" />
           <span>
-            {total > 0 ? (
+             {total > 0 ? (
               <>
-                <strong>{total}</strong> orders in this view. Use tags &
-                dispute status to narrow down.
+                <strong>{total}</strong> orders in this view. Use tags & dispute status to narrow down.
               </>
             ) : (
               <>No orders match this view yet.</>
@@ -290,8 +291,7 @@ export const OrderTable: React.FC<OrderTableProps> = ({
         </div>
       </div>
 
-      {/* Tabs & actions */}
-      <div className="border-b border-zinc-200 px-6 pt-3 pb-2 bg-white/80">
+      <div className="flex-none border-b border-zinc-200 px-6 pt-3 pb-2 bg-white">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-1">
             {[
@@ -301,10 +301,7 @@ export const OrderTable: React.FC<OrderTableProps> = ({
               { id: "ALL" as TabType, label: "All Orders" },
             ].map((tab) => {
               const isActive = activeTab === tab.id;
-              const count =
-                isActive
-                  ? filtered.length
-                  : undefined;
+              const count = isActive ? filtered.length : undefined;
 
               return (
                 <button
@@ -353,44 +350,45 @@ export const OrderTable: React.FC<OrderTableProps> = ({
         </div>
       </div>
 
-      {/* Main scrollable region */}
-      <div className="flex-1 flex flex-col min-h-0">
-        {/* SCROLL CONTAINER (vertical + horizontal) */}
-        <div className="flex-1 min-h-0 overflow-auto">
-          <div className="min-w-[1400px]">
-            <table className="w-full text-sm border-separate border-spacing-0 whitespace-nowrap">
-              <thead className="bg-[#f9fafb] text-xs text-zinc-500 border-b border-zinc-200">
+      {/* --- SCROLLABLE CONTENT SECTION --- */}
+      {/* REQUIREMENT: flex-1 min-h-0 overflow-auto */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        
+        {/* REQUIREMENT: min-w-[1400px] -> Forces horizontal scroll if screen is small */}
+        <div className="min-w-[1400px]"> 
+          <table className="w-full text-sm border-separate border-spacing-0 whitespace-nowrap">
+            <thead className="bg-[#f9fafb] text-xs text-zinc-500 sticky top-0 z-10 shadow-sm">
                 <tr>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left w-10 border-b border-zinc-200">
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left w-10 border-b border-zinc-200">
                     <input type="checkbox" className="rounded border-zinc-300" />
                   </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
                     Order
                   </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
                     Date
                   </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
                     Customer
                   </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
                     Channel
                   </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
                     Total
                   </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
                     Dispute / Risk
                   </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
                     Payment
                   </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
                     Tags
                   </th>
                 </tr>
-              </thead>
-              <tbody className="bg-white">
+            </thead>
+            <tbody className="bg-white">
                 {pageOrders.length === 0 ? (
                   <tr>
                     <td
@@ -449,53 +447,38 @@ export const OrderTable: React.FC<OrderTableProps> = ({
                     );
                   })
                 )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Footer (ALWAYS visible inside card, not inside scroll) */}
-        <div className="border-t border-zinc-200 bg-white px-4 py-2 flex items-center justify-between text-xs text-zinc-600 shrink-0">
-          <div>
-            Showing{" "}
-            <span className="font-medium">
-              {displayStart}–{displayEnd}
-            </span>{" "}
-            of <span className="font-medium">{total}</span> orders
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handlePrev}
-              disabled={safePage === 1}
-              className={`inline-flex items-center gap-1 px-2 py-1 border rounded-md text-xs ${
-                safePage === 1
-                  ? "border-zinc-200 text-zinc-400 cursor-not-allowed bg-zinc-50"
-                  : "border-zinc-300 text-zinc-700 bg-white hover:bg-zinc-50"
-              }`}
-            >
-              <ChevronLeft className="w-3 h-3" />
-              Prev
-            </button>
-            <span className="text-[11px] text-zinc-500">
-              Page {safePage} of {totalPages}
-            </span>
-            <button
-              type="button"
-              onClick={handleNext}
-              disabled={safePage === totalPages}
-              className={`inline-flex items-center gap-1 px-2 py-1 border rounded-md text-xs ${
-                safePage === totalPages
-                  ? "border-zinc-200 text-zinc-400 cursor-not-allowed bg-zinc-50"
-                  : "border-zinc-300 text-zinc-700 bg-white hover:bg-zinc-50"
-              }`}
-            >
-              Next
-              <ChevronRight className="w-3 h-3" />
-            </button>
-          </div>
+            </tbody>
+          </table>
         </div>
       </div>
+
+      {/* --- FIXED FOOTER SECTION --- */}
+      {/* REQUIREMENT: Pagination always visible at bottom (Not inside scroll area) */}
+      <div className="flex-none border-t border-zinc-200 bg-white px-4 py-2 flex items-center justify-between text-xs text-zinc-600 z-10 relative">
+        <div>
+          Showing <span className="font-medium">{displayStart}–{displayEnd}</span> of <span className="font-medium">{total}</span> orders
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handlePrev}
+            disabled={safePage === 1}
+            className={`inline-flex items-center gap-1 px-2 py-1 border rounded-md text-xs ${safePage === 1 ? "opacity-50 cursor-not-allowed" : "hover:bg-zinc-50"}`}
+          >
+            <ChevronLeft className="w-3 h-3" /> Prev
+          </button>
+          
+          <span className="text-[11px] text-zinc-500">Page {safePage} of {totalPages}</span>
+          
+          <button
+            onClick={handleNext}
+            disabled={safePage === totalPages}
+            className={`inline-flex items-center gap-1 px-2 py-1 border rounded-md text-xs ${safePage === totalPages ? "opacity-50 cursor-not-allowed" : "hover:bg-zinc-50"}`}
+          >
+            Next <ChevronRight className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
+      
     </div>
   );
 };
