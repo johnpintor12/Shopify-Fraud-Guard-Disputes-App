@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Sidebar } from "./components/Sidebar";
-import { OrderTable } from "./components/OrderTable";
-import { Auth } from "./components/Auth";
-import { Order, ShopifyCredentials, TabType, ImportCategory } from "./types";
+// src/App.tsx
+import React, { useState, useEffect, useRef } from 'react';
+import { Sidebar } from './components/Sidebar';
+import { OrderTable } from './components/OrderTable';
+import { Auth } from './components/Auth';
+import { Order, ShopifyCredentials, TabType, ImportCategory } from './types';
 import {
   LogOut,
   Database,
@@ -13,20 +14,16 @@ import {
   RefreshCw,
   Globe,
   AlertCircle,
-} from "lucide-react";
-import { fetchOrders } from "./services/shopifyService";
-import { parseShopifyCSV } from "./services/csvService";
-import { supabase } from "./lib/supabase";
+} from 'lucide-react';
+import { fetchOrders } from './services/shopifyService';
+import { parseShopifyCSV } from './services/csvService';
+import { supabase } from './lib/supabase';
 import {
   fetchSavedDisputes,
   fetchUserProfile,
   saveUserProfile,
-} from "./services/disputeService";
-import {
-  loadOrdersFromDb,
-  saveOrdersToDb,
-} from "./services/storageService";
-import { ClearDataButton } from "./components/ClearDataButton";
+} from './services/disputeService';
+import { loadOrdersFromDb, saveOrdersToDb } from './services/storageService';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -38,14 +35,14 @@ const App: React.FC = () => {
     null
   );
   const [showSettings, setShowSettings] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabType>("RISK");
+  const [activeTab, setActiveTab] = useState<TabType>('RISK');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // CSV Import State
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importCategory, setImportCategory] =
-    useState<ImportCategory>("AUTO");
+    useState<ImportCategory>('AUTO');
 
   // 1. Auth & Session Management
   useEffect(() => {
@@ -84,8 +81,7 @@ const App: React.FC = () => {
       let domain =
         profile?.shopify_domain || import.meta.env.VITE_SHOPIFY_STORE;
       let token =
-        profile?.shopify_access_token ||
-        import.meta.env.VITE_SHOPIFY_API_KEY;
+        profile?.shopify_access_token || import.meta.env.VITE_SHOPIFY_API_KEY;
 
       if (domain && token) {
         setCredentials({
@@ -101,7 +97,7 @@ const App: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      setError("Failed to load user profile.");
+      setError('Failed to load user profile.');
     } finally {
       setLoading(false);
     }
@@ -117,63 +113,18 @@ const App: React.FC = () => {
       const savedDisputes = await fetchSavedDisputes();
 
       const mergedOrders = liveOrders.map((order) => {
-        const saved = savedDisputes.find(
-          (d) => d.order_id === (order as any).id
-        );
-        if (saved) {
-          return { ...order, savedDispute: saved };
-        }
-        return order;
+        const saved = savedDisputes.find((d) => d.order_id === order.id);
+        return saved ? { ...order, savedDispute: saved } : order;
       });
 
-      // SAVE TO DATABASE
       await saveOrdersToDb(mergedOrders);
-
       setOrders(mergedOrders);
-      setNotification("Synced with Shopify & Saved to Database");
+
+      setNotification('Synced with Shopify & saved to database');
       setTimeout(() => setNotification(null), 3000);
     } catch (e: any) {
-      console.error("Sync failed", e);
-      setError("Sync failed: " + e.message);
-    }
-  };
-
-  const handleConnect = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const form = e.target as HTMLFormElement;
-    const domain = (form.elements.namedItem(
-      "shopDomain"
-    ) as HTMLInputElement).value;
-    const token = (form.elements.namedItem(
-      "accessToken"
-    ) as HTMLInputElement).value;
-    const useProxy = (form.elements.namedItem(
-      "useProxy"
-    ) as HTMLInputElement).checked;
-
-    if (!domain || !token) return;
-
-    setLoading(true);
-    setError(null);
-    try {
-      await fetchOrders(domain, token, useProxy);
-      setCredentials({ shopDomain: domain, accessToken: token, useProxy });
-
-      if (session) {
-        await saveUserProfile(domain, token, "");
-      }
-
-      await loadAndSyncOrders(domain, token, useProxy);
-      setShowSettings(false);
-    } catch (err: any) {
-      let errorMessage = err.message || "Failed to connect.";
-      if (errorMessage.includes("Failed to fetch")) {
-        errorMessage =
-          "Network Error. Please enable 'Use CORS Proxy' or check AdBlocker.";
-      }
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
+      console.error('Sync failed', e);
+      setError('Sync failed: ' + e.message);
     }
   };
 
@@ -182,9 +133,9 @@ const App: React.FC = () => {
     const file = event.target.files?.[0];
     if (file) {
       setPendingFile(file);
-      setImportCategory("AUTO"); // Default
+      setImportCategory('AUTO'); // Default
       setShowImportModal(true);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -197,7 +148,7 @@ const App: React.FC = () => {
     reader.onload = async (e) => {
       try {
         const text = e.target?.result as string;
-        console.log("Parsing CSV with category:", importCategory);
+        console.log('Parsing CSV with category:', importCategory);
 
         // Pass the selected category to the parser
         const parsedOrders = parseShopifyCSV(text, importCategory);
@@ -205,9 +156,7 @@ const App: React.FC = () => {
         // Restore disputes from DB if they exist for these orders
         const savedDisputes = await fetchSavedDisputes();
         const mergedOrders = parsedOrders.map((order) => {
-          const saved = savedDisputes.find(
-            (d) => d.order_id === (order as any).id
-          );
+          const saved = savedDisputes.find((d) => d.order_id === order.id);
           return saved ? { ...order, savedDispute: saved } : order;
         });
 
@@ -215,22 +164,20 @@ const App: React.FC = () => {
         await saveOrdersToDb(mergedOrders);
 
         setOrders(mergedOrders);
-        setNotification(
-          `Imported & Saved ${parsedOrders.length} orders.`
-        );
+        setNotification(`Imported & saved ${parsedOrders.length} orders.`);
         setTimeout(() => setNotification(null), 3000);
 
         // Switch tab based on import type to be helpful
-        if (importCategory === "RISK") setActiveTab("RISK");
-        if (importCategory === "DISPUTE_OPEN") setActiveTab("DISPUTES");
+        if (importCategory === 'RISK') setActiveTab('RISK');
+        if (importCategory === 'DISPUTE_OPEN') setActiveTab('DISPUTES');
         if (
-          importCategory === "DISPUTE_WON" ||
-          importCategory === "DISPUTE_LOST"
+          importCategory === 'DISPUTE_WON' ||
+          importCategory === 'DISPUTE_LOST'
         )
-          setActiveTab("HISTORY");
-        if (importCategory === "AUTO") setActiveTab("ALL");
+          setActiveTab('HISTORY');
+        if (importCategory === 'AUTO') setActiveTab('ALL');
       } catch (err: any) {
-        console.error("CSV Import Error:", err);
+        console.error('CSV Import Error:', err);
         setError(`Failed to parse CSV file: ${err.message}`);
       } finally {
         setLoading(false);
@@ -251,7 +198,43 @@ const App: React.FC = () => {
         credentials.useProxy || true
       );
     } catch (err) {
-      setError("Failed to refresh orders.");
+      setError('Failed to refresh orders.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConnect = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const form = e.target as HTMLFormElement;
+    const domain = (form.elements.namedItem('shopDomain') as HTMLInputElement)
+      .value;
+    const token = (form.elements.namedItem('accessToken') as HTMLInputElement)
+      .value;
+    const useProxy = (form.elements.namedItem('useProxy') as HTMLInputElement)
+      .checked;
+
+    if (!domain || !token) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      await fetchOrders(domain, token, useProxy);
+      setCredentials({ shopDomain: domain, accessToken: token, useProxy });
+
+      if (session) {
+        await saveUserProfile(domain, token, '');
+      }
+
+      await loadAndSyncOrders(domain, token, useProxy);
+      setShowSettings(false);
+    } catch (err: any) {
+      let errorMessage = err.message || 'Failed to connect.';
+      if (errorMessage.includes('Failed to fetch')) {
+        errorMessage =
+          "Network error. Please enable 'Use CORS Proxy' or check AdBlocker.";
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -303,16 +286,16 @@ const App: React.FC = () => {
             <div className="space-y-3 mb-6">
               <label
                 className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  importCategory === "AUTO"
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-zinc-200 hover:bg-zinc-50"
+                  importCategory === 'AUTO'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-zinc-200 hover:bg-zinc-50'
                 }`}
               >
                 <input
                   type="radio"
                   name="cat"
-                  checked={importCategory === "AUTO"}
-                  onChange={() => setImportCategory("AUTO")}
+                  checked={importCategory === 'AUTO'}
+                  onChange={() => setImportCategory('AUTO')}
                   className="text-blue-600"
                 />
                 <div className="flex-1">
@@ -327,16 +310,16 @@ const App: React.FC = () => {
 
               <label
                 className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  importCategory === "RISK"
-                    ? "border-red-500 bg-red-50"
-                    : "border-zinc-200 hover:bg-zinc-50"
+                  importCategory === 'RISK'
+                    ? 'border-red-500 bg-red-50'
+                    : 'border-zinc-200 hover:bg-zinc-50'
                 }`}
               >
                 <input
                   type="radio"
                   name="cat"
-                  checked={importCategory === "RISK"}
-                  onChange={() => setImportCategory("RISK")}
+                  checked={importCategory === 'RISK'}
+                  onChange={() => setImportCategory('RISK')}
                   className="text-red-600"
                 />
                 <div className="flex-1">
@@ -351,16 +334,16 @@ const App: React.FC = () => {
 
               <label
                 className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  importCategory === "DISPUTE_OPEN"
-                    ? "border-orange-500 bg-orange-50"
-                    : "border-zinc-200 hover:bg-zinc-50"
+                  importCategory === 'DISPUTE_OPEN'
+                    ? 'border-orange-500 bg-orange-50'
+                    : 'border-zinc-200 hover:bg-zinc-50'
                 }`}
               >
                 <input
                   type="radio"
                   name="cat"
-                  checked={importCategory === "DISPUTE_OPEN"}
-                  onChange={() => setImportCategory("DISPUTE_OPEN")}
+                  checked={importCategory === 'DISPUTE_OPEN'}
+                  onChange={() => setImportCategory('DISPUTE_OPEN')}
                   className="text-orange-600"
                 />
                 <div className="flex-1">
@@ -376,16 +359,16 @@ const App: React.FC = () => {
               <div className="flex gap-2">
                 <label
                   className={`flex-1 flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    importCategory === "DISPUTE_WON"
-                      ? "border-green-500 bg-green-50"
-                      : "border-zinc-200 hover:bg-zinc-50"
+                    importCategory === 'DISPUTE_WON'
+                      ? 'border-green-500 bg-green-50'
+                      : 'border-zinc-200 hover:bg-zinc-50'
                   }`}
                 >
                   <input
                     type="radio"
                     name="cat"
-                    checked={importCategory === "DISPUTE_WON"}
-                    onChange={() => setImportCategory("DISPUTE_WON")}
+                    checked={importCategory === 'DISPUTE_WON'}
+                    onChange={() => setImportCategory('DISPUTE_WON')}
                     className="text-green-600"
                   />
                   <div className="font-medium text-sm text-zinc-900">
@@ -394,16 +377,16 @@ const App: React.FC = () => {
                 </label>
                 <label
                   className={`flex-1 flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    importCategory === "DISPUTE_LOST"
-                      ? "border-zinc-500 bg-zinc-100"
-                      : "border-zinc-200 hover:bg-zinc-50"
+                    importCategory === 'DISPUTE_LOST'
+                      ? 'border-zinc-500 bg-zinc-100'
+                      : 'border-zinc-200 hover:bg-zinc-50'
                   }`}
                 >
                   <input
                     type="radio"
                     name="cat"
-                    checked={importCategory === "DISPUTE_LOST"}
-                    onChange={() => setImportCategory("DISPUTE_LOST")}
+                    checked={importCategory === 'DISPUTE_LOST'}
+                    onChange={() => setImportCategory('DISPUTE_LOST')}
                     className="text-zinc-600"
                   />
                   <div className="font-medium text-sm text-zinc-900">
@@ -428,7 +411,7 @@ const App: React.FC = () => {
                 disabled={loading}
                 className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
               >
-                {loading ? "Processing..." : "Import Orders"}
+                {loading ? 'Processing...' : 'Import Orders'}
               </button>
             </div>
           </div>
@@ -437,7 +420,7 @@ const App: React.FC = () => {
 
       {/* Toast Notification */}
       {notification && (
-        <div className="fixed bottom-6 right-6 bg-zinc-900 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50 animate-in fade-in slide-in-from-bottom-4">
+        <div className="fixed bottom-6 right-6 bg-zinc-900 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50">
           <CheckCircle className="w-5 h-5 text-green-400" />
           <p className="text-sm font-medium">{notification}</p>
           <button
@@ -502,7 +485,7 @@ const App: React.FC = () => {
                   name="accessToken"
                   type="password"
                   defaultValue={credentials?.accessToken}
-                  placeholder="shpat_..."
+                  placeholder="shpat_."
                   className="w-full px-3 py-2 border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -514,10 +497,7 @@ const App: React.FC = () => {
                   defaultChecked={true}
                   className="mt-1"
                 />
-                <label
-                  htmlFor="useProxy"
-                  className="text-sm text-zinc-600"
-                >
+                <label htmlFor="useProxy" className="text-sm text-zinc-600">
                   Use CORS Proxy (Required for Web)
                 </label>
               </div>
@@ -527,7 +507,7 @@ const App: React.FC = () => {
                 disabled={loading}
                 className="w-full py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
               >
-                {loading ? "Saving..." : "Save & Connect"}
+                {loading ? 'Saving...' : 'Save & Connect'}
               </button>
             </form>
 
@@ -552,11 +532,11 @@ const App: React.FC = () => {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         onOpenSettings={() => setShowSettings(true)}
+        onClearData={() => setOrders([])}   // <-- purge callback
       />
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-        {/* Header */}
         <header className="h-14 bg-white border-b border-zinc-200 flex items-center justify-between px-6 shrink-0 z-20">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-bold text-zinc-800">
@@ -569,22 +549,14 @@ const App: React.FC = () => {
             )}
           </div>
 
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 flex items-center gap-2 shadow-sm transition-colors"
-                title="Import Shopify CSV"
-              >
-                <Upload className="w-4 h-4" /> Import CSV
-              </button>
-
-              {/* Danger zone: clear imported data */}
-              <ClearDataButton
-                userId={session.user.id}
-                onCleared={() => setOrders([])}
-              />
-            </div>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 flex items-center gap-2 shadow-sm transition-colors"
+              title="Import Shopify CSV"
+            >
+              <Upload className="w-4 h-4" /> Import CSV
+            </button>
 
             <div className="text-sm text-zinc-500 hidden md:block">
               {session.user.email}
@@ -599,7 +571,7 @@ const App: React.FC = () => {
           </div>
         </header>
 
-        <main className="flex-1 flex flex-col overflow-hidden bg-[#f1f2f4]">
+        <main className="flex-1 flex flex-col overflow-hidden relative bg-[#f1f2f4]">
           <div className="flex-1 flex flex-col p-6 min-h-0">
             <div className="flex justify-between items-center mb-4 shrink-0">
               <div className="flex items-center gap-2">
@@ -613,15 +585,15 @@ const App: React.FC = () => {
                 >
                   <RefreshCw
                     className={`w-4 h-4 ${
-                      loading ? "animate-spin" : ""
+                      loading ? 'animate-spin' : ''
                     }`}
                   />
                 </button>
               </div>
             </div>
 
-            {/* Main Content Area - OrderTable handles its own scroll */}
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden relative">
+            {/* Main Content Area - Scroll is handled inside OrderTable now */}
+            <div className="flex-1 min-h-0 relative flex flex-col">
               {loading && orders.length === 0 ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm z-10 rounded-lg">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900"></div>
@@ -630,14 +602,12 @@ const App: React.FC = () => {
               ) : null}
 
               {orders.length > 0 || loading ? (
-                <div className="flex-1 min-h-0">
-                  <OrderTable
-                    orders={orders}
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                    onRefresh={handleRefresh}
-                  />
-                </div>
+                <OrderTable
+                  orders={orders}
+                  activeTab={activeTab}
+                  onTabChange={setActiveTab}
+                  onRefresh={handleRefresh}
+                />
               ) : (
                 <div className="text-center py-12 bg-white rounded-lg border border-zinc-200 border-dashed mt-8">
                   <p className="text-zinc-500 mb-3">
