@@ -22,26 +22,39 @@ const ClearDataButton: React.FC<ClearDataButtonProps> = ({ onCleared }) => {
 
       console.log("Attempting purge for user:", user.id);
 
-      // 1. Delete Disputes
-      const { error: disputeError, count: disputeCount } = await supabase
-        .from('disputes')
-        .delete({ count: 'exact' })
+      // 1. PRE-CHECK: See how many orders exist
+      const { count: initialCount, error: countError } = await supabase
+        .from('orders')
+        .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id);
 
-      if (disputeError) throw new Error(disputeError.message);
+      if (countError) throw new Error("Could not verify data: " + countError.message);
 
-      // 2. Delete Orders
-      const { error: orderError, count: orderCount } = await supabase
+      // 2. DELETE DISPUTES
+      const { error: disputeError } = await supabase
+        .from('disputes')
+        .delete()
+        .eq('user_id', user.id);
+
+      if (disputeError) throw new Error("Dispute delete failed: " + disputeError.message);
+
+      // 3. DELETE ORDERS
+      const { error: orderError, count: deletedCount } = await supabase
         .from('orders')
         .delete({ count: 'exact' })
         .eq('user_id', user.id);
 
-      if (orderError) throw new Error(orderError.message);
+      if (orderError) throw new Error("Order delete failed: " + orderError.message);
 
-      const totalDeleted = (disputeCount || 0) + (orderCount || 0);
-      console.log(`Purge complete. Deleted ${totalDeleted} items.`);
+      // 4. VERIFY DELETION
+      // If we had orders (initialCount > 0) but deleted 0, RLS blocked us.
+      if (initialCount && initialCount > 0 && deletedCount === 0) {
+        throw new Error("Database Permission Error: The database blocked the deletion. Please run the SQL 'DELETE' policy fix.");
+      }
+
+      console.log(`Purge complete. Deleted ${deletedCount} orders.`);
       
-      // Update UI
+      // Only close modal and clear UI if successful
       setShowModal(false);
       onCleared();
 
