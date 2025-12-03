@@ -83,7 +83,8 @@ export const OrderTable: React.FC<OrderTableProps> = ({
           return (
             disputeStatus === 'needs response' ||
             disputeStatus === 'under review' ||
-            importCategory.includes("dispute_open")
+            importCategory.includes("dispute_open") ||
+            importCategory.includes("dispute_submitted")
           );
         case "HISTORY":
           return (
@@ -137,9 +138,14 @@ export const OrderTable: React.FC<OrderTableProps> = ({
     if (status === DisputeStatus.LOST) {
       return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-700 border border-zinc-200">Lost</span>;
     }
-    if (status === DisputeStatus.NEEDS_RESPONSE || status === DisputeStatus.UNDER_REVIEW) {
+    // CHANGED: Separate badges for Needs Response vs Under Review
+    if (status === DisputeStatus.NEEDS_RESPONSE) {
       return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Action required</span>;
     }
+    if (status === DisputeStatus.UNDER_REVIEW) {
+      return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">Under Review</span>;
+    }
+    
     if (order.isHighRisk) {
       return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">High risk</span>;
     }
@@ -284,7 +290,7 @@ export const OrderTable: React.FC<OrderTableProps> = ({
                       
                       {/* --- NEW AI ACTION COLUMN --- */}
                       <td className="px-4 py-2 align-middle">
-                        {(order.disputeStatus === DisputeStatus.NEEDS_RESPONSE || order.disputeStatus === DisputeStatus.UNDER_REVIEW || order.isHighRisk) ? (
+                        {(order.disputeStatus === DisputeStatus.NEEDS_RESPONSE || order.isHighRisk) ? (
                           <button
                             onClick={() => handleGenerate(order)}
                             disabled={generatingId === order.id}
