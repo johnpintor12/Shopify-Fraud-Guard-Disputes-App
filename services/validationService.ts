@@ -10,37 +10,21 @@ const hasNumbers = (str: string) => /\d/.test(str);
 export const validateOrder = (order: Order): Order => {
   const errorReasons: string[] = [];
 
-  // 1. ID Check
-  if (!order.id || !hasNumbers(order.id)) {
-    errorReasons.push("Invalid Order #");
-  }
-
-  // 2. Date Check
-  if (!order.date || !isValidDate(order.date)) {
-    errorReasons.push("Invalid Date");
-  }
-
-  // 3. Email Check
-  if (!order.customer.email || !isValidEmail(order.customer.email)) {
-    errorReasons.push("Invalid Email");
-  }
-
-  // 4. Tag Check
-  if (!order.tags || order.tags.length === 0) {
-    errorReasons.push("Missing Tags");
-  }
+  if (!order.id || !hasNumbers(order.id)) errorReasons.push("Invalid Order #");
+  if (!order.date || !isValidDate(order.date)) errorReasons.push("Invalid Date");
+  if (!order.customer.email || !isValidEmail(order.customer.email)) errorReasons.push("Invalid Email");
+  if (!order.tags || order.tags.length === 0) errorReasons.push("Missing Tags");
 
   const isInvalid = errorReasons.length > 0;
 
-  // LOGIC:
-  // If it fails rules -> Move to INVALID
-  // If it passes rules AND was previously INVALID -> Move to INTELLIGENT CATEGORY (Restore)
-  // If it passes rules AND was NOT INVALID -> Keep existing category
-
   if (isInvalid) {
+    // Preserve original category if it exists, or grab current valid category
+    const prevCategory = order.import_category !== 'INVALID' ? order.import_category : order.original_category;
+
     return {
       ...order,
       import_category: 'INVALID',
+      original_category: prevCategory, // <--- PRESERVE THIS
       import_error: errorReasons.join(', '),
       isHighRisk: false, 
       disputeStatus: DisputeStatus.NONE 
@@ -49,35 +33,37 @@ export const validateOrder = (order: Order): Order => {
   
   if (!isInvalid && order.import_category === 'INVALID') {
     // It was broken, now it's fixed.
-    // Try to determine where it belongs.
-    const classification = determineCategoryFromTags(order.tags);
+    // Use original_category if available, otherwise try to detect.
+    let targetCategory = order.original_category;
+    let classification = null;
 
-    // For AUTO-SCAN only: If we can't figure it out, default to RISK (Safe Fallback)
-    // We don't want to throw errors during a background scan.
-    const finalClass = classification || { 
-        category: 'RISK', 
-        status: DisputeStatus.NONE, 
-        isHighRisk: true 
-    };
+    if (targetCategory && targetCategory !== 'AUTO' && targetCategory !== 'INVALID') {
+        // Restore based on saved intent
+        if (targetCategory === 'DISPUTE_WON') classification = { category: 'DISPUTE_WON', status: DisputeStatus.WON, isHighRisk: false };
+        else if (targetCategory === 'DISPUTE_LOST') classification = { category: 'DISPUTE_LOST', status: DisputeStatus.LOST, isHighRisk: false };
+        else if (targetCategory === 'DISPUTE_SUBMITTED') classification = { category: 'DISPUTE_SUBMITTED', status: DisputeStatus.UNDER_REVIEW, isHighRisk: true };
+        else if (targetCategory === 'DISPUTE_OPEN') classification = { category: 'DISPUTE_OPEN', status: DisputeStatus.NEEDS_RESPONSE, isHighRisk: true };
+        else classification = { category: 'RISK', status: DisputeStatus.NONE, isHighRisk: true };
+    } else {
+        // Fallback to tags if no memory
+        const tagClass = determineCategoryFromTags(order.tags);
+        classification = tagClass || { category: 'RISK', status: DisputeStatus.NONE, isHighRisk: true };
+    }
 
     return {
       ...order,
-      import_category: finalClass.category as ImportCategory,
+      import_category: classification.category as ImportCategory,
       import_error: undefined,
-      disputeStatus: finalClass.status,
-      isHighRisk: finalClass.isHighRisk
+      disputeStatus: classification.status,
+      isHighRisk: classification.isHighRisk
     };
   }
 
   return order;
 };
 
-// --- NEW HELPERS ---
-
-/**
- * Helper to figure out where an order belongs based on tags.
- * Returns NULL if it can't find a matching tag.
- */
+// ... (Keep the rest of the file helpers: determineCategoryFromTags, applyFixesAndRevalidate, forceApproveOrder, revalidateDatabase) ...
+// The rest of this file is identical to the previous version provided.
 const determineCategoryFromTags = (tags: string[]) => {
     const lowerTags = tags.map(t => t.toLowerCase());
     
@@ -93,13 +79,9 @@ const determineCategoryFromTags = (tags: string[]) => {
     if (lowerTags.some(t => t.includes('open') || t.includes('chargeback') || t.includes('dispute'))) {
         return { category: 'DISPUTE_OPEN', status: DisputeStatus.NEEDS_RESPONSE, isHighRisk: true };
     }
-    // No specific category found
     return null;
 };
 
-/**
- * Applies manual edits to an order and immediately re-checks if it is valid.
- */
 export const applyFixesAndRevalidate = (original: Order, updates: Partial<Order>): Order => {
     const merged = { 
         ...original, 
@@ -112,14 +94,9 @@ export const applyFixesAndRevalidate = (original: Order, updates: Partial<Order>
     return validateOrder(merged);
 };
 
-/**
- * Forcefully moves an order out of Quarantine.
- * STRICT MODE: Throws an error if the tags don't clearly indicate where the order belongs.
- */
 export const forceApproveOrder = (order: Order): Order => {
     const classification = determineCategoryFromTags(order.tags);
 
-    // If we can't tell what this order is, FAIL and tell the user to fix it.
     if (!classification) {
         throw new Error(
             "Cannot determine order type. Please EDIT the tags to include 'won', 'lost', 'submitted', or 'chargeback' before marking as valid."
