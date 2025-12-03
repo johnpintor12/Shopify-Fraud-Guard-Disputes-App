@@ -11,7 +11,9 @@ import {
   Copy,
   Check,
   AlertTriangle,
-  ScanSearch
+  ScanSearch,
+  Pencil,
+  CheckCircle2
 } from "lucide-react";
 import { generateChargebackResponse } from "../services/geminiService";
 
@@ -20,6 +22,8 @@ interface OrderTableProps {
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
   onValidate: () => void;
+  onEdit?: (order: Order, updates: Partial<Order>) => void;
+  onApprove?: (order: Order) => void;
 }
 
 const ROWS_PER_PAGE = 50;
@@ -29,6 +33,8 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   activeTab,
   onTabChange,
   onValidate,
+  onEdit,
+  onApprove
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   
@@ -37,6 +43,36 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   const [generatedLetter, setGeneratedLetter] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+
+  // Edit Modal State
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [editForm, setEditForm] = useState({ id: '', date: '', email: '', tags: '' });
+
+  useEffect(() => {
+    if (editingOrder) {
+        setEditForm({
+            id: editingOrder.id,
+            date: editingOrder.date,
+            email: editingOrder.customer.email,
+            tags: editingOrder.tags.join(', ')
+        });
+    }
+  }, [editingOrder]);
+
+  const handleSaveEdit = () => {
+      if (!editingOrder || !onEdit) return;
+      const tagsArray = editForm.tags.split(',').map(t => t.trim()).filter(Boolean);
+      onEdit(editingOrder, {
+          id: editForm.id,
+          date: editForm.date,
+          customer: {
+              ...editingOrder.customer,
+              email: editForm.email
+          },
+          tags: tagsArray
+      });
+      setEditingOrder(null);
+  };
 
   // ---------- AI ACTIONS ----------
   const handleGenerate = async (order: Order) => {
@@ -61,7 +97,7 @@ export const OrderTable: React.FC<OrderTableProps> = ({
     }
   };
 
-  // ---------- FILTERING (Tab logic) ----------
+  // ---------- FILTERING ----------
   const filtered = useMemo(() => {
     return orders.filter((order) => {
       const tagString = Array.isArray(order.tags) ? order.tags.join(",") : "";
@@ -136,10 +172,8 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   };
 
   const getDisputeBadge = (order: Order) => {
-    // 1. INVALID DATA BADGE (with text wrap)
     if (order.import_category === 'INVALID') {
         return (
-            // Added 'whitespace-normal' and 'max-w-[220px]' to force wrapping within a limit
             <div className="flex flex-col items-start gap-1 whitespace-normal max-w-[220px]">
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
                     <AlertTriangle className="w-3 h-3 shrink-0" /> Invalid Data
@@ -177,6 +211,56 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   return (
     <div className="flex flex-col h-full w-full relative">
       
+      {/* --- EDIT MODAL --- */}
+      {editingOrder && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md border border-zinc-200 flex flex-col">
+                <div className="flex items-center justify-between p-4 border-b border-zinc-200 bg-zinc-50 rounded-t-xl">
+                    <h3 className="font-bold text-zinc-900">Edit Order Details</h3>
+                    <button onClick={() => setEditingOrder(null)} className="text-zinc-400 hover:text-zinc-600"><X className="w-5 h-5"/></button>
+                </div>
+                <div className="p-6 space-y-4">
+                    <div>
+                        <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Order ID</label>
+                        <input 
+                            value={editForm.id} 
+                            onChange={e => setEditForm({...editForm, id: e.target.value})}
+                            className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Date</label>
+                        <input 
+                            value={editForm.date} 
+                            onChange={e => setEditForm({...editForm, date: e.target.value})}
+                            className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Customer Email</label>
+                        <input 
+                            value={editForm.email} 
+                            onChange={e => setEditForm({...editForm, email: e.target.value})}
+                            className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-zinc-500 uppercase mb-1">Tags (comma separated)</label>
+                        <input 
+                            value={editForm.tags} 
+                            onChange={e => setEditForm({...editForm, tags: e.target.value})}
+                            className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        />
+                    </div>
+                </div>
+                <div className="p-4 border-t border-zinc-200 bg-zinc-50 flex gap-3 justify-end rounded-b-xl">
+                    <button onClick={() => setEditingOrder(null)} className="px-4 py-2 bg-white border border-zinc-300 text-zinc-700 rounded-lg text-sm font-medium hover:bg-zinc-50">Cancel</button>
+                    <button onClick={handleSaveEdit} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-sm">Save & Re-validate</button>
+                </div>
+            </div>
+        </div>
+      )}
+
       {/* --- AI GENERATION MODAL --- */}
       {showModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -294,7 +378,7 @@ export const OrderTable: React.FC<OrderTableProps> = ({
                   <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">Channel</th>
                   <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">Total</th>
                   <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">Dispute / Risk</th>
-                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">AI Actions</th>
+                  <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">Actions</th>
                   <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">Payment</th>
                   <th className="bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">Tags</th>
                 </tr>
@@ -316,9 +400,27 @@ export const OrderTable: React.FC<OrderTableProps> = ({
                       <td className="px-4 py-2 align-middle text-[13px] text-zinc-900">{formatMoney(order)}</td>
                       <td className="px-4 py-2 align-middle">{getDisputeBadge(order)}</td>
                       
-                      {/* --- AI ACTION COLUMN --- */}
+                      {/* --- ACTIONS COLUMN --- */}
                       <td className="px-4 py-2 align-middle">
-                        {(order.disputeStatus === DisputeStatus.NEEDS_RESPONSE || order.isHighRisk) && order.import_category !== 'INVALID' ? (
+                        {/* QUARANTINE ACTIONS */}
+                        {activeTab === 'QUARANTINE' && order.import_category === 'INVALID' ? (
+                            <div className="flex items-center gap-2">
+                                <button 
+                                    onClick={() => setEditingOrder(order)}
+                                    className="p-1.5 bg-zinc-100 hover:bg-zinc-200 rounded text-zinc-600 border border-zinc-200 transition-colors" title="Edit Order"
+                                >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button 
+                                    onClick={() => onApprove && onApprove(order)}
+                                    className="p-1.5 bg-green-50 hover:bg-green-100 rounded text-green-600 border border-green-200 transition-colors" title="Force Accept (Mark as Valid)"
+                                >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        ) : 
+                        // NORMAL AI ACTIONS
+                        (order.disputeStatus === DisputeStatus.NEEDS_RESPONSE || order.isHighRisk) && order.import_category !== 'INVALID' ? (
                           <button
                             onClick={() => handleGenerate(order)}
                             disabled={generatingId === order.id}
