@@ -2,15 +2,6 @@
 import { supabase } from '../supabase';
 import { Order, DisputeStatus } from '../types';
 
-// Where did this info come from?
-export type ImportSource =
-  | 'fraud'
-  | 'dispute_open'
-  | 'dispute_submitted'
-  | 'dispute_won'
-  | 'dispute_lost'
-  | 'orders';
-
 // Rank for dispute statuses so we can pick the "strongest"
 const statusRank: Record<string, number> = {
   none: 0,
@@ -38,6 +29,14 @@ const mapDisputeStatus = (status?: DisputeStatus): string => {
 };
 
 // Infer the import source from the order's current state
+type ImportSource =
+  | 'fraud'
+  | 'dispute_open'
+  | 'dispute_submitted'
+  | 'dispute_won'
+  | 'dispute_lost'
+  | 'orders';
+
 const inferImportSource = (order: Order): ImportSource => {
   switch (order.disputeStatus) {
     case DisputeStatus.NEEDS_RESPONSE:
@@ -153,7 +152,7 @@ export const saveOrdersToDb = async (orders: Order[]) => {
 
 /**
  * Load all orders for the current user from Supabase.
- * This keeps your existing behaviour: just returns the stored Order JSON.
+ * This matches your previous behaviour: returns the stored Order JSON.
  */
 export const loadOrdersFromDb = async (): Promise<Order[]> => {
   const {
@@ -183,4 +182,66 @@ export const loadOrdersFromDb = async (): Promise<Order[]> => {
   }
 
   return (data || []).map((row: any) => row.data as Order);
+};
+
+/**
+ * Clear ALL imported data for the current user.
+ *
+ * - Deletes rows from: disputes, order_imports, orders
+ * - Does NOT drop tables or touch profiles (Shopify credentials).
+ */
+export const clearAllImportedData = async (): Promise<void> => {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError) {
+    console.error('[Storage] Error getting Supabase user:', userError);
+    throw userError;
+  }
+
+  if (!user) {
+    console.error('[Storage] No authenticated user – cannot clear data.');
+    throw new Error('Not authenticated. Please sign in again.');
+  }
+
+  console.log(
+    `[Storage] Clearing all imported data for user ${user.id.slice(0, 8)}...`
+  );
+
+  // 1) Clear disputes
+  const { error: disputesError } = await supabase
+    .from('disputes')
+    .delete()
+    .eq('user_id', user.id);
+
+  if (disputesError) {
+    console.error('[Storage] Failed to clear disputes:', disputesError);
+    throw disputesError;
+  }
+
+  // 2) Clear order_imports (if you are using this table)
+  const { error: importsError } = await supabase
+    .from('order_imports')
+    .delete()
+    .eq('user_id', user.id);
+
+  if (importsError) {
+    console.error('[Storage] Failed to clear order_imports:', importsError);
+    throw importsError;
+  }
+
+  // 3) Clear orders
+  const { error: ordersError } = await supabase
+    .from('orders')
+    .delete()
+    .eq('user_id', user.id);
+
+  if (ordersError) {
+    console.error('[Storage] Failed to clear orders:', ordersError);
+    throw ordersError;
+  }
+
+  console.log('[Storage] All imported data cleared for this user.');
 };
