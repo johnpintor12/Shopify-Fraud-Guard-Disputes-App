@@ -1,12 +1,11 @@
-// components/ClearDataButton.tsx
-import React, { useState } from 'react';
-import { Trash2 } from 'lucide-react';
-import { supabase } from '../lib/supabase';
+import React, { useState } from "react";
+import { Trash2 } from "lucide-react";
+import { supabase } from "../lib/supabase";
 
-type ClearDataButtonProps = {
+interface ClearDataButtonProps {
   userId: string;
   onCleared?: () => void;
-};
+}
 
 export const ClearDataButton: React.FC<ClearDataButtonProps> = ({
   userId,
@@ -18,36 +17,36 @@ export const ClearDataButton: React.FC<ClearDataButtonProps> = ({
     if (!userId || isClearing) return;
 
     const confirmed = window.confirm(
-      'This will permanently delete ALL imported orders and disputes for this account.\n\nThe tables stay, but your data will be wiped.\n\nAre you sure you want to continue?'
+      "This will permanently delete ALL imported orders and disputes for this account.\n\nThe tables remain, but your records will be wiped.\n\nAre you sure you want to continue?"
     );
 
     if (!confirmed) return;
 
     setIsClearing(true);
     try {
-      // Clear disputes first (in case of foreign key references)
+      // Delete disputes first
       const { error: disputesError } = await supabase
-        .from('disputes')
+        .from("disputes")
         .delete()
-        .eq('user_id', userId);
+        .eq("user_id", userId);
 
       if (disputesError) throw disputesError;
 
-      // Clear orders for this user
+      // Delete orders for this user
       const { error: ordersError } = await supabase
-        .from('orders')
+        .from("orders")
         .delete()
-        .eq('user_id', userId);
+        .eq("user_id", userId);
 
       if (ordersError) throw ordersError;
 
       if (onCleared) onCleared();
-      alert('All imported data has been cleared for this account.');
+      alert("All imported data has been cleared for this account.");
     } catch (err: any) {
-      console.error('Failed to clear data', err);
+      console.error("Failed to clear data", err);
       alert(
-        'Failed to clear data from Supabase.\n\n' +
-          (err?.message || 'Unknown error.')
+        "Failed to clear data from Supabase.\n\n" +
+          (err?.message || "Unknown error.")
       );
     } finally {
       setIsClearing(false);
@@ -69,7 +68,7 @@ export const ClearDataButton: React.FC<ClearDataButtonProps> = ({
         title="Clear all imported data for this account"
       >
         <Trash2 className="w-3.5 h-3.5" />
-        {isClearing ? 'Clearing…' : 'Clear imported data'}
+        {isClearing ? "Clearing…" : "Clear imported data"}
       </button>
     </div>
   );
