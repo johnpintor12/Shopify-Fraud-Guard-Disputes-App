@@ -16,7 +16,9 @@ import {
   Clock,
   ShieldAlert,
   ThumbsUp,
-  ThumbsDown
+  ThumbsDown,
+  Globe,
+  Database
 } from 'lucide-react';
 import { parseShopifyCSV } from './services/csvService';
 import { supabase } from './lib/supabase';
@@ -35,7 +37,7 @@ const App: React.FC = () => {
   // CSV Import State
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  // Default to 'DISPUTE_OPEN' instead of 'AUTO'
+  // Default to 'DISPUTE_OPEN'
   const [importCategory, setImportCategory] = useState<ImportCategory>('DISPUTE_OPEN');
 
   // 1. Auth & Session Management
@@ -168,7 +170,7 @@ const App: React.FC = () => {
 
       {/* --- IMPORT MODAL --- */}
       {showImportModal && pendingFile && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 border border-zinc-200">
             <div className="flex items-center gap-3 mb-4">
               <div className="bg-blue-100 p-2.5 rounded-lg text-blue-600">
@@ -182,11 +184,11 @@ const App: React.FC = () => {
 
             <p className="text-sm text-zinc-600 mb-4 font-medium">Select the status for these orders:</p>
 
-            <div className="space-y-2 mb-6 max-h-[400px] overflow-y-auto">
+            <div className="space-y-2 mb-6 max-h-[50vh] overflow-y-auto pr-1">
               
               {/* Option 1: Open Dispute */}
-              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_OPEN' ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_OPEN'} onChange={() => setImportCategory('DISPUTE_OPEN')} className="text-amber-600 w-4 h-4" />
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'DISPUTE_OPEN' ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_OPEN'} onChange={() => setImportCategory('DISPUTE_OPEN')} className="accent-amber-600 w-4 h-4" />
                 <div className="flex-1">
                   <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
                     <AlertTriangle className="w-4 h-4 text-amber-600" />
@@ -197,8 +199,8 @@ const App: React.FC = () => {
               </label>
 
               {/* Option 2: Submitted */}
-              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_SUBMITTED' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_SUBMITTED'} onChange={() => setImportCategory('DISPUTE_SUBMITTED')} className="text-blue-600 w-4 h-4" />
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'DISPUTE_SUBMITTED' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_SUBMITTED'} onChange={() => setImportCategory('DISPUTE_SUBMITTED')} className="accent-blue-600 w-4 h-4" />
                 <div className="flex-1">
                   <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
                     <Clock className="w-4 h-4 text-blue-600" />
@@ -209,8 +211,8 @@ const App: React.FC = () => {
               </label>
 
               {/* Option 3: Won */}
-              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_WON' ? 'border-green-500 bg-green-50 ring-1 ring-green-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_WON'} onChange={() => setImportCategory('DISPUTE_WON')} className="text-green-600 w-4 h-4" />
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'DISPUTE_WON' ? 'border-green-500 bg-green-50 ring-1 ring-green-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_WON'} onChange={() => setImportCategory('DISPUTE_WON')} className="accent-green-600 w-4 h-4" />
                 <div className="flex-1">
                   <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
                     <ThumbsUp className="w-4 h-4 text-green-600" />
@@ -221,8 +223,8 @@ const App: React.FC = () => {
               </label>
 
               {/* Option 4: Lost */}
-              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_LOST' ? 'border-zinc-500 bg-zinc-100 ring-1 ring-zinc-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_LOST'} onChange={() => setImportCategory('DISPUTE_LOST')} className="text-zinc-600 w-4 h-4" />
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'DISPUTE_LOST' ? 'border-zinc-500 bg-zinc-100 ring-1 ring-zinc-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_LOST'} onChange={() => setImportCategory('DISPUTE_LOST')} className="accent-zinc-600 w-4 h-4" />
                 <div className="flex-1">
                   <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
                     <ThumbsDown className="w-4 h-4 text-zinc-600" />
@@ -233,8 +235,8 @@ const App: React.FC = () => {
               </label>
 
               {/* Option 5: High Risk */}
-              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'RISK' ? 'border-red-500 bg-red-50 ring-1 ring-red-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                <input type="radio" name="cat" checked={importCategory === 'RISK'} onChange={() => setImportCategory('RISK')} className="text-red-600 w-4 h-4" />
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'RISK' ? 'border-red-500 bg-red-50 ring-1 ring-red-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'RISK'} onChange={() => setImportCategory('RISK')} className="accent-red-600 w-4 h-4" />
                 <div className="flex-1">
                   <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
                     <ShieldAlert className="w-4 h-4 text-red-600" />
@@ -246,9 +248,9 @@ const App: React.FC = () => {
 
             </div>
 
-            <div className="flex gap-3">
-              <button onClick={() => { setShowImportModal(false); setPendingFile(null); }} className="flex-1 py-2.5 bg-white border border-zinc-300 text-zinc-700 rounded-lg font-medium hover:bg-zinc-50">Cancel</button>
-              <button onClick={processImport} disabled={loading} className="flex-1 py-2.5 bg-zinc-900 text-white rounded-lg font-medium hover:bg-zinc-800 disabled:opacity-50">{loading ? 'Processing...' : 'Import Orders'}</button>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => { setShowImportModal(false); setPendingFile(null); }} className="flex-1 py-2.5 bg-white border border-zinc-300 text-zinc-700 rounded-lg font-medium hover:bg-zinc-50 shadow-sm transition-colors">Cancel</button>
+              <button onClick={processImport} disabled={loading} className="flex-1 py-2.5 bg-zinc-900 text-white rounded-lg font-medium hover:bg-zinc-800 disabled:opacity-50 shadow-md transition-all active:scale-95">{loading ? 'Processing...' : 'Import Orders'}</button>
             </div>
           </div>
         </div>
@@ -256,7 +258,7 @@ const App: React.FC = () => {
 
       {/* --- TOAST NOTIFICATION --- */}
       {notification && (
-        <div className="fixed bottom-6 right-6 bg-zinc-900 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50">
+        <div className="fixed bottom-6 right-6 bg-zinc-900 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-[100] animate-in slide-in-from-bottom-5">
           <CheckCircle className="w-5 h-5 text-green-400" />
           <p className="text-sm font-medium">{notification}</p>
           <button onClick={() => setNotification(null)} className="text-zinc-400 hover:text-white"><X className="w-4 h-4" /></button>
@@ -278,7 +280,7 @@ const App: React.FC = () => {
         {/* Header */}
         <header className="h-14 flex-none bg-white border-b border-zinc-200 flex items-center justify-between px-6 z-20">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-zinc-800 text-red-600">Dispute Management</h1>
+            <h1 className="text-lg font-bold text-zinc-800 text-red-600">Dispute Management v2</h1>
             <span className="px-2 py-0.5 bg-zinc-100 text-zinc-600 text-xs rounded-full font-medium border border-zinc-200 flex items-center gap-1">
                Offline / CSV Mode
             </span>
