@@ -1,21 +1,64 @@
+// src/services/validationService.ts
 import { Order, DisputeStatus, ImportCategory } from '../types';
 import { loadOrdersFromDb, saveOrdersToDb } from './storageService';
+
+// --- HELPERS (Must be at the top to avoid ReferenceError) ---
 
 const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const isValidDate = (dateStr: string) => !isNaN(Date.parse(dateStr));
 const hasNumbers = (str: string) => /\d/.test(str);
 
+/**
+ * Helper to figure out where an order belongs based on tags.
+ */
+const determineCategoryFromTags = (tags: string[]) => {
+    const lowerTags = tags.map(t => t.toLowerCase());
+    
+    if (lowerTags.some(t => t.includes('won'))) {
+        return { category: 'DISPUTE_WON', status: DisputeStatus.WON, isHighRisk: false };
+    } 
+    if (lowerTags.some(t => t.includes('lost'))) {
+        return { category: 'DISPUTE_LOST', status: DisputeStatus.LOST, isHighRisk: false };
+    } 
+    if (lowerTags.some(t => t.includes('submitted') || t.includes('under review'))) {
+        return { category: 'DISPUTE_SUBMITTED', status: DisputeStatus.UNDER_REVIEW, isHighRisk: true };
+    } 
+    if (lowerTags.some(t => t.includes('open') || t.includes('chargeback') || t.includes('dispute'))) {
+        return { category: 'DISPUTE_OPEN', status: DisputeStatus.NEEDS_RESPONSE, isHighRisk: true };
+    }
+    // No specific category found
+    return null;
+};
+
+// --- MAIN LOGIC ---
+
 export const validateOrder = (order: Order): Order => {
   const errorReasons: string[] = [];
 
-  if (!order.id || !hasNumbers(order.id)) errorReasons.push("Invalid Order #");
-  if (!order.date || !isValidDate(order.date)) errorReasons.push("Invalid Date");
-  if (!order.customer.email || !isValidEmail(order.customer.email)) errorReasons.push("Invalid Email");
-  if (!order.tags || order.tags.length === 0) errorReasons.push("Missing Tags");
+  // 1. ID Check
+  if (!order.id || !hasNumbers(order.id)) {
+    errorReasons.push("Invalid Order #");
+  }
+
+  // 2. Date Check
+  if (!order.date || !isValidDate(order.date)) {
+    errorReasons.push("Invalid Date");
+  }
+
+  // 3. Email Check
+  if (!order.customer.email || !isValidEmail(order.customer.email)) {
+    errorReasons.push("Invalid Email");
+  }
+
+  // 4. Tag Check
+  if (!order.tags || order.tags.length === 0) {
+    errorReasons.push("Missing Tags");
+  }
 
   const isInvalid = errorReasons.length > 0;
 
   if (isInvalid) {
+    // Preserve original category if it exists
     const prevCategory = order.import_category !== 'INVALID' ? order.import_category : order.original_category;
 
     return {
@@ -29,17 +72,23 @@ export const validateOrder = (order: Order): Order => {
   } 
   
   if (!isInvalid && order.import_category === 'INVALID') {
+    // RECOVERY: It was broken, now it is fixed.
+    
+    // 1. Try to use the remembered original category
     let targetCategory = order.original_category;
     let classification = null;
 
     if (targetCategory && targetCategory !== 'AUTO' && targetCategory !== 'INVALID') {
+        // Restore based on saved intent
         if (targetCategory === 'DISPUTE_WON') classification = { category: 'DISPUTE_WON', status: DisputeStatus.WON, isHighRisk: false };
         else if (targetCategory === 'DISPUTE_LOST') classification = { category: 'DISPUTE_LOST', status: DisputeStatus.LOST, isHighRisk: false };
         else if (targetCategory === 'DISPUTE_SUBMITTED') classification = { category: 'DISPUTE_SUBMITTED', status: DisputeStatus.UNDER_REVIEW, isHighRisk: true };
         else if (targetCategory === 'DISPUTE_OPEN') classification = { category: 'DISPUTE_OPEN', status: DisputeStatus.NEEDS_RESPONSE, isHighRisk: true };
         else classification = { category: 'RISK', status: DisputeStatus.NONE, isHighRisk: true };
     } else {
+        // 2. Fallback to tags
         const tagClass = determineCategoryFromTags(order.tags);
+        // 3. Last resort fallback for AUTO-SCAN (Default to Risk to avoid crash)
         classification = tagClass || { category: 'RISK', status: DisputeStatus.NONE, isHighRisk: true };
     }
 
@@ -55,15 +104,9 @@ export const validateOrder = (order: Order): Order => {
   return order;
 };
 
-const determineCategoryFromTags = (tags: string[]) => {
-    const lowerTags = tags.map(t => t.toLowerCase());
-    if (lowerTags.some(t => t.includes('won'))) return { category: 'DISPUTE_WON', status: DisputeStatus.WON, isHighRisk: false };
-    if (lowerTags.some(t => t.includes('lost'))) return { category: 'DISPUTE_LOST', status: DisputeStatus.LOST, isHighRisk: false };
-    if (lowerTags.some(t => t.includes('submitted') || t.includes('under review'))) return { category: 'DISPUTE_SUBMITTED', status: DisputeStatus.UNDER_REVIEW, isHighRisk: true };
-    if (lowerTags.some(t => t.includes('open') || t.includes('chargeback') || t.includes('dispute'))) return { category: 'DISPUTE_OPEN', status: DisputeStatus.NEEDS_RESPONSE, isHighRisk: true };
-    return null;
-};
-
+/**
+ * Applies manual edits to an order and immediately re-checks if it is valid.
+ */
 export const applyFixesAndRevalidate = (original: Order, updates: Partial<Order>): Order => {
     const merged = { 
         ...original, 
@@ -76,9 +119,14 @@ export const applyFixesAndRevalidate = (original: Order, updates: Partial<Order>
     return validateOrder(merged);
 };
 
+/**
+ * Forcefully moves an order out of Quarantine.
+ * STRICT MODE: Throws an error if the tags don't clearly indicate where the order belongs.
+ */
 export const forceApproveOrder = (order: Order): Order => {
     const classification = determineCategoryFromTags(order.tags);
 
+    // If we can't tell what this order is, FAIL and tell the user to fix it.
     if (!classification) {
         throw new Error(
             "Cannot determine order type. Please EDIT the tags to include 'won', 'lost', 'submitted', or 'chargeback' before marking as valid."
