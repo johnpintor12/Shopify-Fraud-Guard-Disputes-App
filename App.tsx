@@ -23,7 +23,6 @@ import {
   saveUserProfile,
 } from './services/disputeService';
 import { loadOrdersFromDb, saveOrdersToDb } from './services/storageService';
-import ClearDataButton from './components/ClearDataButton';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -31,7 +30,9 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
-  const [credentials, setCredentials] = useState<ShopifyCredentials | null>(null);
+  const [credentials, setCredentials] = useState<ShopifyCredentials | null>(
+    null
+  );
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>('RISK');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -287,7 +288,7 @@ const App: React.FC = () => {
 
             <div className="space-y-3 mb-6">
               <label
-                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                className={`flex items-content gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
                   importCategory === 'AUTO'
                     ? 'border-blue-500 bg-blue-50'
                     : 'border-zinc-200 hover:bg-zinc-50'
@@ -497,10 +498,7 @@ const App: React.FC = () => {
                   defaultChecked={true}
                   className="mt-1"
                 />
-                <label
-                  htmlFor="useProxy"
-                  className="text-sm text-zinc-600"
-                >
+                <label htmlFor="useProxy" className="text-sm text-zinc-600">
                   Use CORS Proxy (Required for Web)
                 </label>
               </div>
@@ -535,6 +533,7 @@ const App: React.FC = () => {
         activeTab={activeTab}
         onTabChange={setActiveTab}
         onOpenSettings={() => setShowSettings(true)}
+        onClearData={() => setOrders([])}
       />
 
       {/* Main Content */}
@@ -559,9 +558,6 @@ const App: React.FC = () => {
             >
               <Upload className="w-4 h-4" /> Import CSV
             </button>
-
-            {/* Clear all imported data */}
-            <ClearDataButton onCleared={() => setOrders([])} />
 
             <div className="text-sm text-zinc-500 hidden md:block">
               {session.user.email}
