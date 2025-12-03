@@ -10,7 +10,6 @@ import {
   FileSpreadsheet,
   Upload,
   X,
-  RefreshCw,
   AlertCircle,
   AlertTriangle,
   Clock,
@@ -20,21 +19,24 @@ import {
   Bell,
   Info,
   ChevronRight,
-  Database,
-  ScanSearch // New Icon
+  Database
 } from 'lucide-react';
 import { parseShopifyCSV } from './services/csvService';
 import { supabase } from './lib/supabase';
 import { fetchSavedDisputes } from './services/disputeService';
 import { loadOrdersFromDb, saveOrdersToDb } from './services/storageService';
 import { fetchAlerts, createAlert, markAlertsRead, clearAlerts } from './services/alertService';
-import { revalidateDatabase } from './services/validationService'; // Import the new service
+import { 
+    revalidateDatabase, 
+    applyFixesAndRevalidate, 
+    forceApproveOrder 
+} from './services/validationService';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showSettings, setShowSettings] = useState(false); // Settings Modal Toggle
+  const [showSettings, setShowSettings] = useState(false);
   
   // --- ALERT SYSTEM STATE ---
   const [toasts, setToasts] = useState<Alert[]>([]); 
@@ -194,24 +196,64 @@ const App: React.FC = () => {
     }
   };
 
+  // --- VALIDATION HANDLERS ---
   const handleRevalidate = async () => {
     setLoading(true);
     try {
         const changes = await revalidateDatabase();
         if (changes > 0) {
-            // Reload to see changes
             const dbOrders = await loadOrdersFromDb();
             setOrders(dbOrders);
             addToast('Scan Complete', `Found and updated ${changes} orders with data issues.`, 'success');
         } else {
-            addToast('Scan Complete', 'No new data issues found.', 'success');
+            addToast('Scan Complete', 'Database scanned. No new issues found.', 'success');
         }
     } catch (err: any) {
         addToast('Scan Failed', 'Could not revalidate database.', 'error', err);
     } finally {
         setLoading(false);
-        setShowSettings(false);
     }
+  };
+
+  const handleEditOrder = async (originalOrder: Order, updates: Partial<Order>) => {
+      setLoading(true);
+      try {
+          const updatedOrder = applyFixesAndRevalidate(originalOrder, updates);
+          await saveOrdersToDb([updatedOrder]);
+          
+          const newOrders = orders.map(o => o.id === originalOrder.id ? updatedOrder : o);
+          setOrders(newOrders);
+          
+          if (updatedOrder.import_category !== 'INVALID') {
+              addToast('Order Fixed', 'Order passed validation and moved to main list.', 'success');
+          } else {
+              addToast('Order Updated', 'Order updated, but still invalid. Check errors.', 'error');
+          }
+      } catch (e: any) {
+          addToast('Update Failed', 'Could not save changes.', 'error', e);
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  const handleForceApprove = async (order: Order) => {
+      if (!window.confirm("Are you sure? This will force the order into the main list.")) return;
+      
+      setLoading(true);
+      try {
+          const approved = forceApproveOrder(order);
+          await saveOrdersToDb([approved]);
+          
+          const newOrders = orders.map(o => o.id === order.id ? approved : o);
+          setOrders(newOrders);
+          
+          addToast('Order Approved', 'Order manually moved to main list.', 'success');
+      } catch (e: any) {
+          // This catches the "Cannot determine order type" error from validationService
+          addToast('Approval Failed', e.message, 'error');
+      } finally {
+          setLoading(false);
+      }
   };
 
   const handleSignOut = async () => {
@@ -250,38 +292,26 @@ const App: React.FC = () => {
         className="hidden"
       />
 
-      {/* --- SETTINGS / TOOLS MODAL --- */}
+      {/* --- SETTINGS MODAL --- */}
       {showSettings && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm border border-zinc-200">
                 <div className="px-6 py-4 border-b border-zinc-100 flex justify-between items-center bg-zinc-50 rounded-t-xl">
                     <h3 className="font-bold text-zinc-900 flex items-center gap-2">
-                        <Database className="w-4 h-4" /> Data Tools
+                        <Database className="w-4 h-4" /> Store Settings
                     </h3>
                     <button onClick={() => setShowSettings(false)} className="text-zinc-400 hover:text-zinc-600"><X className="w-5 h-5"/></button>
                 </div>
                 
-                <div className="p-6 space-y-4">
-                    <div className="space-y-2">
-                        <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Maintenance</label>
-                        <button 
-                            onClick={handleRevalidate}
-                            disabled={loading}
-                            className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 border border-blue-100 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium"
-                        >
-                            <ScanSearch className="w-5 h-5" />
-                            <div className="text-left">
-                                <div>Re-scan Database</div>
-                                <div className="text-xs opacity-70 font-normal">Check all orders for invalid data</div>
-                            </div>
-                        </button>
-                    </div>
+                <div className="p-6 text-center text-sm text-zinc-500">
+                    <p>Current Store: <span className="font-medium text-zinc-900">CSV Mode (Offline)</span></p>
+                    <p className="mt-2 text-xs">To connect a live store, please configure API keys in the environment variables.</p>
                 </div>
             </div>
         </div>
       )}
 
-      {/* --- ALERT DETAIL MODAL (Keep existing code) --- */}
+      {/* --- ALERT DETAIL MODAL --- */}
       {selectedAlert && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
@@ -316,7 +346,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* --- IMPORT MODAL (Keep existing code) --- */}
+      {/* --- IMPORT MODAL --- */}
       {showImportModal && pendingFile && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 border border-zinc-200">
@@ -333,7 +363,6 @@ const App: React.FC = () => {
             <p className="text-sm text-zinc-600 mb-4 font-medium">Select the status for these orders:</p>
 
             <div className="space-y-2 mb-6 max-h-[50vh] overflow-y-auto pr-1">
-              {/* Option 1: Open Dispute */}
               <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'DISPUTE_OPEN' ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
                 <input type="radio" name="cat" checked={importCategory === 'DISPUTE_OPEN'} onChange={() => setImportCategory('DISPUTE_OPEN')} className="accent-amber-600 w-4 h-4" />
                 <div className="flex-1">
@@ -345,7 +374,6 @@ const App: React.FC = () => {
                 </div>
               </label>
 
-              {/* Option 2: Submitted */}
               <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'DISPUTE_SUBMITTED' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
                 <input type="radio" name="cat" checked={importCategory === 'DISPUTE_SUBMITTED'} onChange={() => setImportCategory('DISPUTE_SUBMITTED')} className="accent-blue-600 w-4 h-4" />
                 <div className="flex-1">
@@ -357,7 +385,6 @@ const App: React.FC = () => {
                 </div>
               </label>
 
-              {/* Option 3: Won */}
               <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'DISPUTE_WON' ? 'border-green-500 bg-green-50 ring-1 ring-green-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
                 <input type="radio" name="cat" checked={importCategory === 'DISPUTE_WON'} onChange={() => setImportCategory('DISPUTE_WON')} className="accent-green-600 w-4 h-4" />
                 <div className="flex-1">
@@ -369,7 +396,6 @@ const App: React.FC = () => {
                 </div>
               </label>
 
-              {/* Option 4: Lost */}
               <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'DISPUTE_LOST' ? 'border-zinc-500 bg-zinc-100 ring-1 ring-zinc-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
                 <input type="radio" name="cat" checked={importCategory === 'DISPUTE_LOST'} onChange={() => setImportCategory('DISPUTE_LOST')} className="accent-zinc-600 w-4 h-4" />
                 <div className="flex-1">
@@ -381,7 +407,6 @@ const App: React.FC = () => {
                 </div>
               </label>
 
-              {/* Option 5: High Risk */}
               <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all ${importCategory === 'RISK' ? 'border-red-500 bg-red-50 ring-1 ring-red-500 shadow-sm' : 'border-zinc-200 hover:bg-zinc-50'}`}>
                 <input type="radio" name="cat" checked={importCategory === 'RISK'} onChange={() => setImportCategory('RISK')} className="accent-red-600 w-4 h-4" />
                 <div className="flex-1">
@@ -438,7 +463,7 @@ const App: React.FC = () => {
         <Sidebar
           activeTab={activeTab}
           onTabChange={setActiveTab}
-          onOpenSettings={() => setShowSettings(true)}  // <--- ENABLED SETTINGS
+          onOpenSettings={() => setShowSettings(true)}
           onClearData={() => { setOrders([]); addToast('Data Purged', 'All records cleared.', 'success'); }}
           orders={orders}
         />
@@ -518,14 +543,11 @@ const App: React.FC = () => {
           <div className="flex justify-between items-center mb-4 flex-none">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-zinc-900">Fraud & Disputes</h2>
-              <button onClick={handleRefresh} className="p-1.5 rounded-md hover:bg-zinc-200 text-zinc-500 transition-colors" title="Reload from Database">
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              </button>
             </div>
           </div>
 
           {/* Table Container */}
-<div className="flex-1 min-h-0 relative flex flex-col bg-white rounded-lg shadow-sm border border-zinc-200 overflow-hidden">
+          <div className="flex-1 min-h-0 relative flex flex-col bg-white rounded-lg shadow-sm border border-zinc-200 overflow-hidden">
             {loading && orders.length === 0 ? (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm z-10">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-zinc-900"></div>
@@ -538,9 +560,9 @@ const App: React.FC = () => {
                 orders={orders}
                 activeTab={activeTab}
                 onTabChange={setActiveTab}
-                // CHANGED: We now pass handleRevalidate here
-                onValidate={handleRevalidate} 
-                onRefresh={handleRefresh} // Kept for future flexibility, but UI button now triggers Validate
+                onValidate={handleRevalidate} // Pass the handler
+                onEdit={handleEditOrder}
+                onApprove={handleForceApprove}
               />
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
