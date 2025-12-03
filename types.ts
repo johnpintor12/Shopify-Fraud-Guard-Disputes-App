@@ -1,35 +1,5 @@
-export enum PaymentStatus {
-  PAID = 'Paid',
-  PENDING = 'Pending',
-  REFUNDED = 'Refunded',
-  VOIDED = 'Voided',
-  PARTIALLY_REFUNDED = 'Partially refunded'
-}
-
-export enum FulfillmentStatus {
-  FULFILLED = 'Fulfilled',
-  UNFULFILLED = 'Unfulfilled',
-  PARTIAL = 'Partial',
-  NULL = 'Unfulfilled'
-}
-
-export enum DeliveryStatus {
-  DELIVERED = 'Delivered',
-  IN_TRANSIT = 'In transit',
-  NO_STATUS = ''
-}
-
-export enum DisputeStatus {
-  NONE = 'None',
-  NEEDS_RESPONSE = 'Needs Response',
-  UNDER_REVIEW = 'Under Review',
-  WON = 'Won',
-  LOST = 'Lost'
-}
-
-export type TabType = 'RISK' | 'DISPUTES' | 'HISTORY' | 'ALL';
-
-export type ImportCategory = 'AUTO' | 'RISK' | 'DISPUTE_OPEN' | 'DISPUTE_SUBMITTED' | 'DISPUTE_WON' | 'DISPUTE_LOST';
+// src/types.ts
+// ... (keep existing enums and interfaces) ...
 
 export interface Customer {
   id: string;
@@ -49,7 +19,20 @@ export interface SavedDispute {
   created_at: string;
 }
 
+// NEW: Alert Interface for Database
+export interface Alert {
+  id: string;
+  user_id?: string;
+  title: string;
+  message: string;
+  type: 'success' | 'error';
+  details?: string;
+  read: boolean;
+  created_at: string;
+}
+
 export interface Order {
+  // ... (keep existing Order fields) ...
   id: string; 
   date: string;
   customer: Customer;
@@ -64,15 +47,12 @@ export interface Order {
   isHighRisk: boolean;
   disputeStatus: DisputeStatus;
   disputeDeadline?: string;
-  
   savedDispute?: SavedDispute; 
   created_at?: string;
   currency?: string;
   source_name?: string;
   risk_category?: string;
   import_category?: string;
-  
-  // NEW: This holds any extra columns from your CSV (Dynamic Headers)
   additional_data?: Record<string, any>;
 }
 
