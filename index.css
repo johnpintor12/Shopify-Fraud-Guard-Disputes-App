@@ -2,16 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
-/* CRITICAL: Force the app to match the browser window height exactly */
+/* CRITICAL FIX: Force the root to fill the screen exactly. 
+   This enables inner-div scrolling for the table. */
 html, body, #root {
   height: 100%;
   width: 100%;
   margin: 0;
   padding: 0;
-  overflow: hidden; /* Disable browser-level scrolling */
+  overflow: hidden; /* Prevents the whole page from scrolling */
 }
 
 body {
   font-family: 'Inter', sans-serif;
   background-color: #f1f2f4;
+  overscroll-behavior: none;
 }
