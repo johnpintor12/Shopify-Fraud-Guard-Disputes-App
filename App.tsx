@@ -402,6 +402,7 @@ const App: React.FC = () => {
           onTabChange={setActiveTab}
           onOpenSettings={() => {}} 
           onClearData={() => { setOrders([]); addToast('Data Purged', 'All records cleared.', 'success'); }}
+          orders={orders}
         />
       </div>
 
