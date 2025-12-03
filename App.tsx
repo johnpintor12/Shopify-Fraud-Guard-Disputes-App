@@ -244,7 +244,7 @@ const App: React.FC = () => {
         {/* Header */}
         <header className="h-14 flex-none bg-white border-b border-zinc-200 flex items-center justify-between px-6 z-20">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-zinc-800">Dispute Management</h1>
+            <h1 className="text-lg font-bold text-zinc-800">Dispute Management v2</h1>
             <span className="px-2 py-0.5 bg-zinc-100 text-zinc-600 text-xs rounded-full font-medium border border-zinc-200 flex items-center gap-1">
                Offline / CSV Mode
             </span>
