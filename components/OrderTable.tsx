@@ -6,12 +6,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
-  RefreshCw,
   Sparkles,
   X,
   Copy,
   Check,
-  AlertTriangle
+  AlertTriangle,
+  ScanSearch // New Icon
 } from "lucide-react";
 import { generateChargebackResponse } from "../services/geminiService";
 
@@ -19,7 +19,7 @@ interface OrderTableProps {
   orders: Order[];
   activeTab: TabType;
   onTabChange: (tab: TabType) => void;
-  onRefresh: () => void;
+  onValidate: () => void; // CHANGED: Replaced onRefresh
 }
 
 const ROWS_PER_PAGE = 50;
@@ -28,7 +28,7 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   orders,
   activeTab,
   onTabChange,
-  onRefresh,
+  onValidate, // Updated Prop
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
   
@@ -96,13 +96,11 @@ export const OrderTable: React.FC<OrderTableProps> = ({
             importCategory.includes("dispute_lost")) &&
             importCategory !== 'invalid'
           );
-        // NEW: QUARANTINE LOGIC
         case "QUARANTINE":
           return importCategory === 'invalid';
           
         case "ALL":
         default:
-          // 'All' should ideally hide invalid data to keep analytics clean
           return importCategory !== 'invalid';
       }
     });
@@ -138,7 +136,6 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   };
 
   const getDisputeBadge = (order: Order) => {
-    // 1. INVALID DATA BADGE
     if (order.import_category === 'INVALID') {
         return (
             <div className="flex flex-col items-start gap-1">
@@ -239,7 +236,11 @@ export const OrderTable: React.FC<OrderTableProps> = ({
               { id: "DISPUTES" as TabType, label: "Chargeback Monitoring" },
               { id: "HISTORY" as TabType, label: "Won / Lost" },
               { id: "ALL" as TabType, label: "All Orders" },
+              { id: "QUARANTINE" as TabType, label: "Data Issues" }, // Make sure this is in tabs if used
             ].map((tab) => {
+              // Hide Quarantine if not needed, handled in Sidebar normally but good to have safety here
+              if (tab.id === 'QUARANTINE' && !orders.some(o => o.import_category === 'INVALID')) return null;
+
               const isActive = activeTab === tab.id;
               const count = isActive ? filtered.length : undefined;
               return (
@@ -269,8 +270,12 @@ export const OrderTable: React.FC<OrderTableProps> = ({
             <button className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-md bg-white hover:bg-zinc-50 text-zinc-700">
               <Filter className="w-3 h-3" /> Filter
             </button>
-            <button onClick={onRefresh} className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-md bg-white hover:bg-zinc-50 text-zinc-700">
-              <RefreshCw className="w-3 h-3" /> Refresh
+            {/* UPDATED: VALIDATE BUTTON */}
+            <button 
+              onClick={onValidate} 
+              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-md bg-white hover:bg-zinc-50 text-blue-700 font-medium"
+            >
+              <ScanSearch className="w-3 h-3" /> Validate Data
             </button>
           </div>
         </div>
