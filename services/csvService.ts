@@ -44,6 +44,11 @@ const mapFulfillmentStatus = (status: string): FulfillmentStatus => {
   return FulfillmentStatus.UNFULFILLED;
 };
 
+// Validation Helpers
+const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const isValidDate = (dateStr: string) => !isNaN(Date.parse(dateStr));
+const hasNumbers = (str: string) => /\d/.test(str); // Checks if string contains at least one digit
+
 export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUTO'): Order[] => {
   const lines = csvText.trim().split('\n');
   if (lines.length < 2) throw new Error("CSV file is empty or invalid.");
@@ -82,26 +87,46 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
     const row = parseCSVLine(line);
     const val = (index: number) => (row[index] ? row[index].trim() : '');
 
-    // CHECK: Does this row have a valid ID?
-    let id = val(idx.name);
-    let isInvalid = false;
-    let importError = '';
+    // --- STRICT VALIDATION LOGIC ---
+    const rawId = val(idx.name);
+    const rawDate = val(idx.createdAt);
+    const rawEmail = val(idx.email);
+    const rawTags = val(idx.tags);
 
-    // If ID is missing, we create a fake one to capture the bad data
-    if (!id) {
-        id = `BAD-DATA-ROW-${i}`;
-        isInvalid = true;
-        importError = 'Missing Order ID';
+    const errorReasons: string[] = [];
+
+    // 1. ID Check (Must be numbers or #1234)
+    if (!rawId || !hasNumbers(rawId)) {
+        errorReasons.push("Invalid Order #");
     }
+
+    // 2. Date Check
+    if (!rawDate || !isValidDate(rawDate)) {
+        errorReasons.push("Invalid Date");
+    }
+
+    // 3. Email Check
+    if (!rawEmail || !isValidEmail(rawEmail)) {
+        errorReasons.push("Invalid Email");
+    }
+
+    // 4. Tag Check (No tags = Bad data for this app)
+    if (!rawTags || rawTags.trim().length === 0) {
+        errorReasons.push("Missing Tags");
+    }
+
+    const isRowInvalid = errorReasons.length > 0;
+    
+    // Create ID for map (use "BAD-ROW-X" if ID is missing so we don't lose the row)
+    const mapId = rawId || `BAD-ROW-${i}`;
 
     const extraData: Record<string, string> = {};
     rawHeaders.forEach((header, index) => {
         extraData[header] = val(index);
     });
 
-    if (!orderMap.has(id)) {
-      const tagsString = val(idx.tags);
-      const tagsList = tagsString.split(',').map(t => t.trim().replace(/^"|"$/g, '')).filter(t => t);
+    if (!orderMap.has(mapId)) {
+      const tagsList = rawTags.split(',').map(t => t.trim().replace(/^"|"$/g, '')).filter(t => t);
       const csvRisk = val(idx.riskLevel).toLowerCase();
       const isNativeHighRisk = csvRisk === 'high' || csvRisk === 'medium';
 
@@ -110,40 +135,40 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
       const country = val(idx.shippingCountry);
       if (city || country) location = [city, country].filter(Boolean).join(', ');
 
-      orderMap.set(id, {
-        id,
-        date: val(idx.createdAt) || 'Unknown Date',
-        email: val(idx.email) || 'No Email',
+      orderMap.set(mapId, {
+        id: mapId,
+        date: rawDate || 'N/A',
+        email: rawEmail || 'N/A',
         financial: val(idx.financial),
         fulfillment: val(idx.fulfillment),
         total: parseFloat(val(idx.total) || '0'),
         currency: val(idx.currency) || 'USD',
         tags: tagsList,
         nativeRisk: isNativeHighRisk,
-        customerName: val(idx.shippingName) || 'Unknown Guest',
+        customerName: val(idx.shippingName) || 'Unknown',
         location: location,
         shippingMethod: val(idx.shippingMethod),
         itemsCount: 0,
         isCancelled: !!val(idx.cancelReason),
         additional_data: extraData,
-        // Error tracking
-        isInvalid: isInvalid,
-        importError: importError
+        // Validation Flags
+        isInvalid: isRowInvalid,
+        importError: errorReasons.join(', ')
       });
     }
 
-    const order = orderMap.get(id);
+    const order = orderMap.get(mapId);
     const qty = parseInt(val(idx.lineItemQty) || '0');
     order.itemsCount += qty > 0 ? qty : 0;
   }
 
   return Array.from(orderMap.values()).map(o => {
-    // If tagged as Invalid during parsing, force it
+    // If flagged invalid, return immediately as QUARANTINE item
     if (o.isInvalid) {
         return {
             id: o.id,
             date: o.date,
-            created_at: o.date,
+            created_at: new Date().toISOString(), // Fallback for sorting
             customer: {
                 id: o.email,
                 name: o.customerName,
@@ -159,16 +184,16 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
             itemsCount: o.itemsCount,
             deliveryStatus: DeliveryStatus.NO_STATUS,
             deliveryMethod: 'Unknown',
-            tags: ['INVALID DATA'],
+            tags: ['INVALID'],
             isHighRisk: false,
             disputeStatus: DisputeStatus.NONE,
             import_category: 'INVALID',
-            import_error: o.importError,
+            import_error: o.importError, // Pass the specific reasons
             additional_data: o.additional_data
         };
     }
 
-    // Normal Processing
+    // --- NORMAL PROCESSING (Only runs if data is valid) ---
     const lowerTags = o.tags.map((t: string) => t.toLowerCase());
     let disputeStatus = DisputeStatus.NONE;
     let isHighRisk = o.nativeRisk;
