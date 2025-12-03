@@ -1,12 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Order, TabType } from "../types";
-import {
-  AlertCircle,
-  ChevronLeft,
-  ChevronRight,
-  Filter,
-  RefreshCw,
-} from "lucide-react";
+import { AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface OrderTableProps {
   orders: Order[];
@@ -15,7 +9,49 @@ interface OrderTableProps {
   onRefresh: () => void;
 }
 
-const ROWS_PER_PAGE = 50;
+const PAGE_SIZE = 50;
+
+// Classification helpers – we rely on flexible fields so it works
+// for both Shopify API and CSV imports.
+const isRiskOrder = (order: Order) => {
+  const o: any = order;
+  const cat = (o.import_category || "").toString().toUpperCase();
+  const risk = (o.risk_level || o.riskCategory || "").toString().toUpperCase();
+  const tags = (
+    Array.isArray(o.tags)
+      ? o.tags.join(",")
+      : (o.tags || "").toString()
+  ).toUpperCase();
+
+  if (cat === "RISK" || cat === "FRAUD") return true;
+  if (risk.includes("HIGH") || risk.includes("FRAUD")) return true;
+  if (tags.includes("FRAUD") || tags.includes("HIGH RISK")) return true;
+  return false;
+};
+
+const isOpenDispute = (order: Order) => {
+  const o: any = order;
+  const cat = (o.import_category || "").toString().toUpperCase();
+  const status = (o.dispute_status || "").toString().toUpperCase();
+  return (
+    cat === "DISPUTE_OPEN" ||
+    status.includes("OPEN") ||
+    status.includes("PENDING") ||
+    status.includes("ACTION REQUIRED")
+  );
+};
+
+const isHistoryDispute = (order: Order) => {
+  const o: any = order;
+  const cat = (o.import_category || "").toString().toUpperCase();
+  const status = (o.dispute_status || "").toString().toUpperCase();
+  return (
+    cat === "DISPUTE_WON" ||
+    cat === "DISPUTE_LOST" ||
+    status.includes("WON") ||
+    status.includes("LOST")
+  );
+};
 
 export const OrderTable: React.FC<OrderTableProps> = ({
   orders,
@@ -23,98 +59,87 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   onTabChange,
   onRefresh,
 }) => {
-  const [currentPage, setCurrentPage] = useState(1);
+  const [page, setPage] = useState(1);
 
-  // --- Filtering logic -------------------------------------------------------
+  // Counts for badges
+  const riskCount = useMemo(
+    () => orders.filter(isRiskOrder).length,
+    [orders]
+  );
+  const openCount = useMemo(
+    () => orders.filter(isOpenDispute).length,
+    [orders]
+  );
+  const historyCount = useMemo(
+    () => orders.filter(isHistoryDispute).length,
+    [orders]
+  );
 
+  const allCount = orders.length;
+
+  // Filter for active tab
   const filtered = useMemo(() => {
-    // NOTE: we use very defensive access because I don't want to fight TS
-    // against your existing Order type. We'll just peek via `any`.
-    return orders.filter((order) => {
-      const o: any = order;
-      const tagString: string =
-        (o.tags && Array.isArray(o.tags) ? o.tags.join(",") : o.tags) || "";
-      const disputeStatus = (o.dispute_status || o.disputeStatus || "").toLowerCase();
-      const riskFlag = (o.risk_category || o.riskCategory || "").toLowerCase();
-      const importCategory = (o.import_category || o.importCategory || "").toLowerCase();
-
-      switch (activeTab) {
-        case "RISK": {
-          // High-risk & fraud view: anything explicitly marked high risk
-          return (
-            riskFlag.includes("high") ||
-            tagString.toLowerCase().includes("high risk") ||
-            tagString.toLowerCase().includes("fraud")
-          );
-        }
-        case "DISPUTES": {
-          // Open Chargebacks only
-          return (
-            disputeStatus.includes("open") ||
-            disputeStatus.includes("pending") ||
-            importCategory.includes("dispute_open")
-          );
-        }
-        case "HISTORY": {
-          // Won / Lost
-          return (
-            disputeStatus.includes("won") ||
-            disputeStatus.includes("lost") ||
-            importCategory.includes("dispute_won") ||
-            importCategory.includes("dispute_lost")
-          );
-        }
-        case "ALL":
-        default:
-          return true;
-      }
-    });
+    switch (activeTab) {
+      case "RISK":
+        return orders.filter(isRiskOrder);
+      case "DISPUTES":
+        return orders.filter(isOpenDispute);
+      case "HISTORY":
+        return orders.filter(isHistoryDispute);
+      case "ALL":
+      default:
+        return orders;
+    }
   }, [orders, activeTab]);
 
-  // --- Pagination ------------------------------------------------------------
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
-
-  const pageSafe = Math.min(currentPage, totalPages);
-  const startIndex = (pageSafe - 1) * ROWS_PER_PAGE;
-  const endIndex = startIndex + ROWS_PER_PAGE;
-  const pageSlice = filtered.slice(startIndex, endIndex);
-
-  const handlePrev = () => setCurrentPage((p) => Math.max(1, p - 1));
-  const handleNext = () => setCurrentPage((p) => Math.min(totalPages, p + 1));
-
-  // Reset to page 1 when tab changes or data size shrinks
-  React.useEffect(() => {
-    setCurrentPage(1);
+  // Reset to first page when tab/data changes
+  useEffect(() => {
+    setPage(1);
   }, [activeTab, filtered.length]);
 
-  // --- Helpers ---------------------------------------------------------------
+  const total = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
 
-  const formatMoney = (order: Order) => {
-    const o: any = order as any;
-    const amount =
-      o.total_price ||
-      o.totalPrice ||
-      o.current_total_price ||
-      o.total ||
-      0;
-    const currency = o.currency || "USD";
-    const n = typeof amount === "number" ? amount : parseFloat(String(amount) || "0");
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(n);
+  const startIndex = total === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const endIndex = total === 0 ? 0 : Math.min(currentPage * PAGE_SIZE, total);
+
+  const pageOrders = useMemo(
+    () =>
+      filtered.slice(
+        (currentPage - 1) * PAGE_SIZE,
+        (currentPage - 1) * PAGE_SIZE + PAGE_SIZE
+      ),
+    [filtered, currentPage]
+  );
+
+  const handlePrev = () => setPage((p) => Math.max(1, p - 1));
+  const handleNext = () => setPage((p) => Math.min(totalPages, p + 1));
+
+  // Helpers for display (defensive, works with many shapes)
+  const getOrderName = (order: Order) => {
+    const o: any = order;
+    return (
+      o.name ||
+      o.order_name ||
+      (o.order_number ? `#${o.order_number}` : null) ||
+      (o.id ? `#${o.id}` : "—")
+    );
   };
 
-  const formatDate = (order: Order) => {
-    const o: any = order as any;
+  const getCreated = (order: Order) => {
+    const o: any = order;
     const raw =
-      o.created_at || o.createdAt || o.processed_at || o.date || null;
+      o.createdAt ||
+      o.created_at ||
+      o.processed_at ||
+      o.order_created_at ||
+      o.date ||
+      null;
     if (!raw) return "—";
     const d = new Date(raw);
-    if (isNaN(d.getTime())) return String(raw);
-    return d.toLocaleDateString("en-US", {
+    if (Number.isNaN(d.getTime())) return String(raw);
+    return d.toLocaleString("en-US", {
       month: "short",
       day: "numeric",
       hour: "numeric",
@@ -122,34 +147,43 @@ export const OrderTable: React.FC<OrderTableProps> = ({
     });
   };
 
-  const getOrderNumber = (order: Order) => {
-    const o: any = order as any;
-    return (
-      o.name ||
-      o.order_name ||
-      o.orderNumber ||
-      `#${o.id ?? ""}`.trim() ||
-      "—"
-    );
+  const getCustomer = (order: Order) => {
+    const o: any = order;
+    if (o.customer_name) return o.customer_name;
+    if (o.customerName) return o.customerName;
+    if (o.customer && (o.customer.first_name || o.customer.last_name)) {
+      return `${o.customer.first_name || ""} ${
+        o.customer.last_name || ""
+      }`.trim();
+    }
+    if (o.email) return o.email;
+    return "Guest";
   };
 
-  const getCustomer = (order: Order) => {
-    const o: any = order as any;
-    return (
-      o.customer_name ||
-      (o.customer && `${o.customer.first_name ?? ""} ${o.customer.last_name ?? ""}`.trim()) ||
-      o.email ||
-      "Guest"
-    );
+  const getTotalFormatted = (order: Order) => {
+    const o: any = order;
+    const currency = o.currency || "USD";
+    const raw =
+      o.total_price ||
+      o.total ||
+      o.current_total_price ||
+      o.subtotal_price ||
+      0;
+    const num = typeof raw === "number" ? raw : parseFloat(String(raw) || "0");
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(num);
   };
 
   const getDisputeStatus = (order: Order) => {
-    const o: any = order as any;
-    return o.dispute_status || o.disputeStatus || "";
+    const o: any = order;
+    return o.dispute_status || "";
   };
 
   const getPaymentStatus = (order: Order) => {
-    const o: any = order as any;
+    const o: any = order;
     return (
       o.payment_status ||
       (o.financial_status && String(o.financial_status).replace("_", " ")) ||
@@ -158,304 +192,294 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   };
 
   const getFulfillmentStatus = (order: Order) => {
-    const o: any = order as any;
+    const o: any = order;
     return (
       o.fulfillment_status ||
-      (o.fulfillment_status_label ?? "").replace("_", " ") ||
+      (o.fulfillment_status_label &&
+        String(o.fulfillment_status_label).replace("_", " ")) ||
       ""
     );
   };
 
-  const getChannel = (order: Order) => {
-    const o: any = order as any;
-    return o.channel || o.source_name || "Online Store";
-  };
-
-  const getItemsCount = (order: Order) => {
-    const o: any = order as any;
-    return o.items_count || o.line_items_count || o.items || "";
-  };
-
-  const getDestination = (order: Order) => {
-    const o: any = order as any;
-    const s = o.shipping_address || o.shippingAddress;
-    if (!s) return "";
-    const pieces = [s.city, s.province_code || s.province, s.country_code || s.country]
-      .filter(Boolean)
-      .join(", ");
-    return pieces;
-  };
-
   const getTags = (order: Order) => {
-    const o: any = order as any;
-    if (Array.isArray(o.tags)) return o.tags.join(", ");
-    return o.tags || "";
+    const o: any = order;
+    if (Array.isArray(o.tags)) return o.tags as string[];
+    if (typeof o.tags === "string") {
+      return o.tags
+        .split(",")
+        .map((t: string) => t.trim())
+        .filter(Boolean);
+    }
+    return [] as string[];
   };
 
-  // --- Render ----------------------------------------------------------------
+  const isCsvImport = (order: Order) => {
+    const o: any = order;
+    return !!o.csv_source || !!o.is_csv;
+  };
 
   return (
-    <section className="flex-1 flex flex-col bg-white border border-zinc-200 rounded-lg shadow-sm overflow-hidden">
-      {/* Top banner like Shopify */}
-      <div className="border-b border-zinc-200 bg-[#fff7f7] px-6 py-3 flex items-start gap-3">
-        <div className="mt-0.5">
-          <AlertCircle className="w-4 h-4 text-red-500" />
-        </div>
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-red-700">
-            {filtered.length} Disputes require your attention
-          </p>
-          <p className="text-xs text-red-500">
-            Response deadlines are approaching. Use the AI drafter to reply
-            quickly.
-          </p>
-        </div>
-        <button className="text-xs px-3 py-1.5 border border-red-200 rounded-md text-red-600 font-medium bg-white hover:bg-red-50">
-          View Disputes
-        </button>
-      </div>
+    <div className="flex-1 min-h-0 flex flex-col">
+      {/* Card wrapper */}
+      <div className="flex-1 min-h-0 bg-white border border-zinc-200 rounded-lg flex flex-col overflow-hidden">
+        {/* Tabs row */}
+        <div className="border-b border-zinc-200 bg-[#fafafb] px-4 pt-3">
+          <div className="flex items-center justify-between">
+            <div className="flex gap-4 text-sm font-medium">
+              <button
+                type="button"
+                onClick={() => onTabChange("RISK")}
+                className={`pb-2 border-b-2 ${
+                  activeTab === "RISK"
+                    ? "border-zinc-900 text-zinc-900"
+                    : "border-transparent text-zinc-500 hover:text-zinc-800"
+                }`}
+              >
+                Fraud Monitoring
+                <span className="ml-2 inline-flex h-5 min-w-[24px] items-center justify-center rounded-full bg-zinc-200 text-[11px]">
+                  {riskCount}
+                </span>
+              </button>
 
-      {/* Tabs & filter bar */}
-      <div className="border-b border-zinc-200 px-6 pt-3 pb-2">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-1">
-            {[
-              { id: "RISK" as TabType, label: "Fraud Monitoring" },
-              { id: "DISPUTES" as TabType, label: "Chargeback Monitoring" },
-              { id: "HISTORY" as TabType, label: "Won/Lost" },
-              { id: "ALL" as TabType, label: "All Orders" },
-            ].map((tab) => {
-              const active = activeTab === tab.id;
-              // badge count is filtered by tab, so we show `filtered.length`
-              const count =
-                activeTab === tab.id
-                  ? filtered.length
-                  : undefined;
+              <button
+                type="button"
+                onClick={() => onTabChange("DISPUTES")}
+                className={`pb-2 border-b-2 ${
+                  activeTab === "DISPUTES"
+                    ? "border-zinc-900 text-zinc-900"
+                    : "border-transparent text-zinc-500 hover:text-zinc-800"
+                }`}
+              >
+                Chargeback Monitoring
+                <span className="ml-2 inline-flex h-5 min-w-[24px] items-center justify-center rounded-full bg-zinc-200 text-[11px]">
+                  {openCount}
+                </span>
+              </button>
 
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => onTabChange(tab.id)}
-                  className={`relative px-3 py-1.5 text-xs font-medium rounded-md border ${
-                    active
-                      ? "bg-white border-zinc-300 text-zinc-900 shadow-[0_1px_0_rgba(15,23,42,0.06)]"
-                      : "bg-transparent border-transparent text-zinc-500 hover:bg-zinc-100"
-                  }`}
-                >
-                  <span>{tab.label}</span>
-                  {typeof count === "number" && (
-                    <span
-                      className={`ml-1 inline-flex items-center justify-center rounded-full px-1.5 min-w-[1.25rem] text-[10px] border ${
-                        active
-                          ? "bg-zinc-900 text-white border-zinc-900"
-                          : "bg-zinc-100 text-zinc-600 border-zinc-200"
-                      }`}
-                    >
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+              <button
+                type="button"
+                onClick={() => onTabChange("HISTORY")}
+                className={`pb-2 border-b-2 ${
+                  activeTab === "HISTORY"
+                    ? "border-zinc-900 text-zinc-900"
+                    : "border-transparent text-zinc-500 hover:text-zinc-800"
+                }`}
+              >
+                Won/Lost
+                <span className="ml-2 inline-flex h-5 min-w-[24px] items-center justify-center rounded-full bg-zinc-200 text-[11px]">
+                  {historyCount}
+                </span>
+              </button>
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-md bg-white hover:bg-zinc-50 text-zinc-700"
-            >
-              <Filter className="w-3 h-3" />
-              Filter orders…
-            </button>
+              <button
+                type="button"
+                onClick={() => onTabChange("ALL")}
+                className={`pb-2 border-b-2 ${
+                  activeTab === "ALL"
+                    ? "border-zinc-900 text-zinc-900"
+                    : "border-transparent text-zinc-500 hover:text-zinc-800"
+                }`}
+              >
+                All Orders
+                <span className="ml-2 inline-flex h-5 min-w-[24px] items-center justify-center rounded-full bg-zinc-200 text-[11px]">
+                  {allCount}
+                </span>
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={onRefresh}
-              className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 border border-zinc-300 rounded-md bg-white hover:bg-zinc-50 text-zinc-700"
+              className="text-xs text-zinc-500 hover:text-zinc-800"
             >
-              <RefreshCw className="w-3 h-3" />
               Refresh
             </button>
           </div>
         </div>
-      </div>
 
-      {/* Main scrollable region */}
-      <div className="flex-1 flex flex-col min-h-0">
-        {/* Scroll container — vertical + horizontal */}
+        {/* Filter bar (UI only for now) */}
+        <div className="border-b border-zinc-200 px-4 py-3 bg-[#fafafb]">
+          <input
+            className="w-full max-w-sm rounded-md border border-zinc-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-900/5"
+            placeholder="Filter orders…"
+            disabled
+          />
+        </div>
+
+        {/* Scrollable table area */}
         <div className="flex-1 min-h-0 overflow-auto">
-          {/* This min-width forces a horizontal scrollbar like Shopify when many columns */}
-          <div className="min-w-[1400px]">
-            <table className="w-full text-sm border-separate border-spacing-0">
-              <thead className="bg-[#f9fafb] text-xs text-zinc-500 border-b border-zinc-200">
-                <tr>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left w-10 border-b border-zinc-200">
-                    <input type="checkbox" className="rounded border-zinc-300" />
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Order
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Channel
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Total
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Payment status
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Fulfillment status
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Items
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Date
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Customer
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Tags
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Destination
-                  </th>
-                  <th className="sticky top-0 z-10 bg-[#f9fafb] px-4 py-2 text-left text-[11px] font-medium border-b border-zinc-200">
-                    Dispute status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageSlice.map((order, idx) => {
-                  const disputeStatus = getDisputeStatus(order);
-                  const paymentStatus = getPaymentStatus(order);
-                  const fulfillmentStatus = getFulfillmentStatus(order);
+          <div className="min-w-[1200px]">
+            {total === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-sm text-zinc-500">
+                <div className="mb-3 rounded-full bg-zinc-100 p-3">
+                  <AlertCircle className="w-5 h-5 text-zinc-400" />
+                </div>
+                <div className="font-medium mb-1">
+                  No orders found in this view
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onTabChange("ALL")}
+                  className="mt-3 inline-flex items-center rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                >
+                  View All Orders
+                </button>
+              </div>
+            ) : (
+              <table className="w-full border-separate border-spacing-0 text-sm">
+                <thead className="bg-[#f7f7f8] text-xs uppercase text-zinc-500">
+                  <tr>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left w-[40px]">
+                      {/* checkbox header */}
+                    </th>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
+                      Order
+                    </th>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
+                      Date
+                    </th>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
+                      Customer
+                    </th>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-right">
+                      Total
+                    </th>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
+                      Dispute Status
+                    </th>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
+                      Payment
+                    </th>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
+                      Fulfillment
+                    </th>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-left">
+                      Tags
+                    </th>
+                    <th className="sticky top-0 z-10 px-4 py-3 border-b border-zinc-200 text-right">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white">
+                  {pageOrders.map((order, idx) => {
+                    const o: any = order;
+                    const disputeStatus = getDisputeStatus(order);
+                    const tags = getTags(order);
+                    const highlight =
+                      isOpenDispute(order) || disputeStatus.toUpperCase().includes("ACTION");
 
-                  const highlight =
-                    activeTab === "DISPUTES" ||
-                    disputeStatus.toLowerCase().includes("action") ||
-                    disputeStatus.toLowerCase().includes("required");
+                    return (
+                      <tr
+                        key={o.id || o.order_id || getOrderName(order) || idx}
+                        className="hover:bg-[#fafafa]"
+                      >
+                        <td className="px-4 py-3 border-b border-zinc-200 w-[40px]">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 rounded border-zinc-300"
+                          />
+                        </td>
 
-                  return (
-                    <tr
-                      key={(order as any).id ?? idx}
-                      className="border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50/60"
-                    >
-                      <td className="px-4 py-3 align-middle">
-                        <input
-                          type="checkbox"
-                          className="rounded border-zinc-300"
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-sm text-blue-600 whitespace-nowrap">
-                        {getOrderNumber(order)}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-zinc-600 whitespace-nowrap">
-                        {getChannel(order)}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-zinc-900 whitespace-nowrap">
-                        {formatMoney(order)}
-                      </td>
-                      <td className="px-4 py-3 text-xs whitespace-nowrap">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-zinc-100 text-zinc-700">
-                          {paymentStatus || "—"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-xs whitespace-nowrap">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-zinc-100 text-zinc-700">
-                          {fulfillmentStatus || "—"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-zinc-600 whitespace-nowrap">
-                        {getItemsCount(order) || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-zinc-600 whitespace-nowrap">
-                        {formatDate(order)}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-zinc-700 whitespace-nowrap">
-                        {getCustomer(order)}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-zinc-500 whitespace-nowrap max-w-[220px] overflow-hidden text-ellipsis">
-                        {getTags(order)}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-zinc-500 whitespace-nowrap max-w-[220px] overflow-hidden text-ellipsis">
-                        {getDestination(order)}
-                      </td>
-                      <td className="px-4 py-3 text-xs whitespace-nowrap">
-                        {disputeStatus ? (
-                          <button
-                            className={`inline-flex flex-col items-center justify-center px-3 py-1.5 rounded-full text-[11px] min-w-[7rem] border ${
-                              highlight
-                                ? "bg-rose-50 text-rose-700 border-rose-200"
-                                : "bg-zinc-100 text-zinc-700 border-zinc-200"
-                            }`}
-                          >
-                            <span className="font-medium">
+                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm font-medium text-blue-600">
+                          {getOrderName(order)}
+                          {isCsvImport(order) && (
+                            <span className="ml-2 inline-flex items-center rounded border border-zinc-300 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">
+                              CSV
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-600">
+                          {getCreated(order)}
+                        </td>
+
+                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-700">
+                          {getCustomer(order)}
+                        </td>
+
+                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-700 text-right">
+                          {getTotalFormatted(order)}
+                        </td>
+
+                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap">
+                          {disputeStatus ? (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium border ${
+                                highlight
+                                  ? "bg-rose-50 text-rose-700 border-rose-200"
+                                  : "bg-zinc-100 text-zinc-700 border-zinc-200"
+                              }`}
+                            >
+                              <AlertCircle className="w-3.5 h-3.5" />
                               {disputeStatus}
                             </span>
-                            {highlight && (
-                              <span className="text-[10px] text-rose-500 pt-0.5">
-                                Review Data
-                              </span>
-                            )}
-                          </button>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                          ) : (
+                            <span className="text-xs text-zinc-400">—</span>
+                          )}
+                        </td>
 
-                {pageSlice.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={12}
-                      className="py-10 text-center text-sm text-zinc-500"
-                    >
-                      No orders in this view.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-600">
+                          {getPaymentStatus(order) || "-"}
+                        </td>
+
+                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm text-zinc-600">
+                          {getFulfillmentStatus(order) || "-"}
+                        </td>
+
+                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-sm">
+                          <div className="flex flex-wrap gap-1 max-w-[280px]">
+                            {tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-700"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 border-b border-zinc-200 whitespace-nowrap text-right text-xs text-blue-600">
+                          Review Data
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
-        {/* Pagination footer (like Shopify 1–50) */}
-        <div className="border-t border-zinc-200 bg-zinc-50 px-4 py-2.5 flex items-center justify-between text-xs text-zinc-600">
-          <div className="flex items-center gap-2">
-            <span>
-              {filtered.length === 0
-                ? "0 orders"
-                : `${startIndex + 1}-${Math.min(
-                    endIndex,
-                    filtered.length
-                  )} of ${filtered.length}`}
-            </span>
+        {/* Footer: pagination summary */}
+        <div className="h-10 border-t border-zinc-200 bg-white px-4 flex items-center justify-between text-xs text-zinc-500">
+          <div>
+            Showing {startIndex} – {endIndex} of {total} orders
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handlePrev}
-              disabled={pageSafe === 1}
-              className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-zinc-300 bg-white disabled:opacity-40 hover:bg-zinc-100"
+              disabled={currentPage === 1}
+              className="inline-flex h-7 w-7 items-center justify-center rounded border border-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-50"
             >
               <ChevronLeft className="w-3 h-3" />
             </button>
-            <span className="px-2">
-              Page {pageSafe} of {totalPages}
+            <span>
+              Page {currentPage} of {totalPages}
             </span>
             <button
+              type="button"
               onClick={handleNext}
-              disabled={pageSafe === totalPages}
-              className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-zinc-300 bg-white disabled:opacity-40 hover:bg-zinc-100"
+              disabled={currentPage === totalPages || total === 0}
+              className="inline-flex h-7 w-7 items-center justify-center rounded border border-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-50"
             >
               <ChevronRight className="w-3 h-3" />
             </button>
           </div>
         </div>
       </div>
-    </section>
+    </div>
   );
 };
