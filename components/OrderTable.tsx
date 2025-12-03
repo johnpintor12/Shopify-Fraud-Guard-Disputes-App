@@ -10,7 +10,8 @@ import {
   Sparkles,
   X,
   Copy,
-  Check
+  Check,
+  AlertTriangle
 } from "lucide-react";
 import { generateChargebackResponse } from "../services/geminiService";
 
@@ -63,7 +64,6 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   // ---------- FILTERING (Tab logic) ----------
   const filtered = useMemo(() => {
     return orders.filter((order) => {
-      // STRICT TYPING: Access properties directly from Order interface
       const tagString = Array.isArray(order.tags) ? order.tags.join(",") : "";
       const lowerTags = tagString.toLowerCase();
       
@@ -74,28 +74,36 @@ export const OrderTable: React.FC<OrderTableProps> = ({
       switch (activeTab) {
         case "RISK":
           return (
-            order.isHighRisk ||
+            (order.isHighRisk ||
             riskFlag.includes("high") ||
             lowerTags.includes("fraud") ||
-            importCategory.includes("risk")
+            importCategory.includes("risk")) &&
+            importCategory !== 'invalid'
           );
         case "DISPUTES":
           return (
-            disputeStatus === 'needs response' ||
+            (disputeStatus === 'needs response' ||
             disputeStatus === 'under review' ||
             importCategory.includes("dispute_open") ||
-            importCategory.includes("dispute_submitted")
+            importCategory.includes("dispute_submitted")) &&
+            importCategory !== 'invalid'
           );
         case "HISTORY":
           return (
-            disputeStatus === 'won' ||
+            (disputeStatus === 'won' ||
             disputeStatus === 'lost' ||
             importCategory.includes("dispute_won") ||
-            importCategory.includes("dispute_lost")
+            importCategory.includes("dispute_lost")) &&
+            importCategory !== 'invalid'
           );
+        // NEW: QUARANTINE LOGIC
+        case "QUARANTINE":
+          return importCategory === 'invalid';
+          
         case "ALL":
         default:
-          return true;
+          // 'All' should ideally hide invalid data to keep analytics clean
+          return importCategory !== 'invalid';
       }
     });
   }, [orders, activeTab]);
@@ -130,6 +138,22 @@ export const OrderTable: React.FC<OrderTableProps> = ({
   };
 
   const getDisputeBadge = (order: Order) => {
+    // 1. INVALID DATA BADGE
+    if (order.import_category === 'INVALID') {
+        return (
+            <div className="flex flex-col items-start gap-1">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+                    <AlertTriangle className="w-3 h-3" /> Invalid Data
+                </span>
+                {order.import_error && (
+                    <span className="text-[10px] text-red-600 max-w-[120px] leading-tight">
+                        {order.import_error}
+                    </span>
+                )}
+            </div>
+        );
+    }
+
     const status = order.disputeStatus;
 
     if (status === DisputeStatus.WON) {
@@ -138,7 +162,6 @@ export const OrderTable: React.FC<OrderTableProps> = ({
     if (status === DisputeStatus.LOST) {
       return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-700 border border-zinc-200">Lost</span>;
     }
-    // CHANGED: Separate badges for Needs Response vs Under Review
     if (status === DisputeStatus.NEEDS_RESPONSE) {
       return <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Action required</span>;
     }
@@ -288,9 +311,9 @@ export const OrderTable: React.FC<OrderTableProps> = ({
                       <td className="px-4 py-2 align-middle text-[13px] text-zinc-900">{formatMoney(order)}</td>
                       <td className="px-4 py-2 align-middle">{getDisputeBadge(order)}</td>
                       
-                      {/* --- NEW AI ACTION COLUMN --- */}
+                      {/* --- AI ACTION COLUMN --- */}
                       <td className="px-4 py-2 align-middle">
-                        {(order.disputeStatus === DisputeStatus.NEEDS_RESPONSE || order.isHighRisk) ? (
+                        {(order.disputeStatus === DisputeStatus.NEEDS_RESPONSE || order.isHighRisk) && order.import_category !== 'INVALID' ? (
                           <button
                             onClick={() => handleGenerate(order)}
                             disabled={generatingId === order.id}
