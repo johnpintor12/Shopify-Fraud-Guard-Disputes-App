@@ -1,5 +1,5 @@
 // src/services/storageService.ts
-import { supabase } from '../supabase';
+import { supabase } from '../lib/supabase';
 import { Order, DisputeStatus } from '../types';
 
 // Rank for dispute statuses so we can pick the "strongest"
@@ -52,52 +52,29 @@ const inferImportSource = (order: Order): ImportSource => {
   }
 };
 
-/**
- * Save / merge orders into Supabase.
- *
- * - One row per (user_id, id) in public.orders.
- * - New imports *enrich* existing rows instead of overwriting:
- *   - dispute status escalates (none → open → submitted → won/lost)
- *   - risk stays high once set
- *   - sources JSON accumulates { fraud: true, dispute_open: true, ... }
- */
 export const saveOrdersToDb = async (orders: Order[]) => {
   const {
     data: { user },
     error: userError,
   } = await supabase.auth.getUser();
 
-  if (userError) {
-    console.error('[Storage] Error getting Supabase user:', userError);
-    throw userError;
-  }
-
-  if (!user) {
+  if (userError || !user) {
     console.error('[Storage] No authenticated user – cannot save orders.');
     throw new Error('Not authenticated. Please sign in again before importing.');
   }
 
-  if (!orders || orders.length === 0) {
-    return;
-  }
-
-  console.log(
-    `[Storage] Saving ${orders.length} orders for user ${user.id.slice(0, 8)}...`
-  );
+  if (!orders || orders.length === 0) return;
 
   const ids = orders.map((o) => o.id);
 
-  // 1) Load existing rows for these orders so we can merge instead of overwrite.
+  // 1) Load existing rows to merge
   const { data: existingRows, error: loadError } = await supabase
     .from('orders')
     .select('id, latest_dispute_status, latest_risk_label, sources')
     .eq('user_id', user.id)
     .in('id', ids);
 
-  if (loadError) {
-    console.error('[Storage] Failed to load existing orders:', loadError);
-    throw loadError;
-  }
+  if (loadError) throw loadError;
 
   const existingById = new Map<string, any>(
     (existingRows || []).map((row: any) => [row.id, row])
@@ -128,47 +105,23 @@ export const saveOrdersToDb = async (orders: Order[]) => {
       id: order.id,
       latest_dispute_status: latestStatus,
       latest_risk_label: latestRisk,
-      latest_dispute_amount: (order as any).disputedAmount ?? null,
-      latest_dispute_currency: (order as any).currency ?? null,
-      latest_dispute_deadline: (order as any).disputeDeadline ?? null,
       sources: newSources,
-      data: order, // full JSON blob the app uses
+      data: order,
       updated_at: new Date().toISOString(),
     };
   });
 
-  // 3) Upsert: one row per (user_id, id) – this is what prevents duplicates
+  // 3) Upsert
   const { error: upsertError } = await supabase
     .from('orders')
     .upsert(upsertRows, { onConflict: 'user_id,id' });
 
-  if (upsertError) {
-    console.error('[Storage] Failed to save orders to DB:', upsertError);
-    throw upsertError;
-  }
-
-  console.log('[Storage] Successfully saved orders.');
+  if (upsertError) throw upsertError;
 };
 
-/**
- * Load all orders for the current user from Supabase.
- * This matches your previous behaviour: returns the stored Order JSON.
- */
 export const loadOrdersFromDb = async (): Promise<Order[]> => {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError) {
-    console.error('[Storage] Error getting Supabase user:', userError);
-    throw userError;
-  }
-
-  if (!user) {
-    console.warn('[Storage] No user when loading orders – returning empty list.');
-    return [];
-  }
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
 
   const { data, error } = await supabase
     .from('orders')
@@ -177,71 +130,20 @@ export const loadOrdersFromDb = async (): Promise<Order[]> => {
     .order('updated_at', { ascending: false });
 
   if (error) {
-    console.error('[Storage] Failed to load orders from DB:', error);
+    console.error('[Storage] Failed to load orders:', error);
     return [];
   }
 
   return (data || []).map((row: any) => row.data as Order);
 };
 
-/**
- * Clear ALL imported data for the current user.
- *
- * - Deletes rows from: disputes, order_imports, orders
- * - Does NOT drop tables or touch profiles (Shopify credentials).
- */
 export const clearAllImportedData = async (): Promise<void> => {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError) {
-    console.error('[Storage] Error getting Supabase user:', userError);
-    throw userError;
-  }
-
-  if (!user) {
-    console.error('[Storage] No authenticated user – cannot clear data.');
-    throw new Error('Not authenticated. Please sign in again.');
-  }
-
-  console.log(
-    `[Storage] Clearing all imported data for user ${user.id.slice(0, 8)}...`
-  );
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated.');
 
   // 1) Clear disputes
-  const { error: disputesError } = await supabase
-    .from('disputes')
-    .delete()
-    .eq('user_id', user.id);
-
-  if (disputesError) {
-    console.error('[Storage] Failed to clear disputes:', disputesError);
-    throw disputesError;
-  }
-
-  // 2) Clear order_imports (if you are using this table)
-  const { error: importsError } = await supabase
-    .from('order_imports')
-    .delete()
-    .eq('user_id', user.id);
-
-  if (importsError) {
-    console.error('[Storage] Failed to clear order_imports:', importsError);
-    throw importsError;
-  }
-
-  // 3) Clear orders
-  const { error: ordersError } = await supabase
-    .from('orders')
-    .delete()
-    .eq('user_id', user.id);
-
-  if (ordersError) {
-    console.error('[Storage] Failed to clear orders:', ordersError);
-    throw ordersError;
-  }
-
-  console.log('[Storage] All imported data cleared for this user.');
+  await supabase.from('disputes').delete().eq('user_id', user.id);
+  
+  // 2) Clear orders
+  await supabase.from('orders').delete().eq('user_id', user.id);
 };
