@@ -1,4 +1,3 @@
-// src/services/alertService.ts
 import { supabase } from '../lib/supabase';
 import { Alert } from '../types';
 
@@ -11,7 +10,7 @@ export const fetchAlerts = async (): Promise<Alert[]> => {
     .select('*')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
-    .limit(50); // Keep the last 50 alerts
+    .limit(50);
 
   if (error) {
     console.error('Error fetching alerts:', error);
@@ -30,7 +29,6 @@ export const createAlert = async (
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Format details safely
   let detailString = details;
   if (typeof details === 'object') {
     try {
@@ -50,7 +48,6 @@ export const createAlert = async (
     created_at: new Date().toISOString(),
   };
 
-  // Save to DB
   const { data, error } = await supabase
     .from('alerts')
     .insert(newAlert)
