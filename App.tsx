@@ -11,7 +11,12 @@ import {
   Upload,
   X,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle,
+  Clock,
+  ShieldAlert,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import { parseShopifyCSV } from './services/csvService';
 import { supabase } from './lib/supabase';
@@ -30,7 +35,8 @@ const App: React.FC = () => {
   // CSV Import State
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [importCategory, setImportCategory] = useState<ImportCategory>('AUTO');
+  // Default to 'DISPUTE_OPEN' instead of 'AUTO'
+  const [importCategory, setImportCategory] = useState<ImportCategory>('DISPUTE_OPEN');
 
   // 1. Auth & Session Management
   useEffect(() => {
@@ -53,9 +59,11 @@ const App: React.FC = () => {
   const loadInitialData = async () => {
     setLoading(true);
     try {
+      // Load cached orders from Database
       const dbOrders = await loadOrdersFromDb();
       if (dbOrders.length > 0) {
         setOrders(dbOrders);
+        // Default to showing all if we have data
         setActiveTab('ALL'); 
       }
     } catch (err) {
@@ -66,16 +74,19 @@ const App: React.FC = () => {
     }
   };
 
+  // Initial File Selection -> Opens Modal
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       setPendingFile(file);
-      setImportCategory('AUTO'); // Default
+      // Reset to a safe default every time modal opens
+      setImportCategory('DISPUTE_OPEN'); 
       setShowImportModal(true);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
+  // Final Processing after Modal selection
   const processImport = () => {
     if (!pendingFile) return;
 
@@ -86,25 +97,28 @@ const App: React.FC = () => {
         const text = e.target?.result as string;
         console.log('Parsing CSV with category:', importCategory);
 
+        // Pass the selected category to the parser
         const parsedOrders = parseShopifyCSV(text, importCategory);
 
+        // Restore disputes from DB if they exist for these orders
         const savedDisputes = await fetchSavedDisputes();
         const mergedOrders = parsedOrders.map((order) => {
           const saved = savedDisputes.find((d) => d.order_id === order.id);
           return saved ? { ...order, savedDispute: saved } : order;
         });
 
-        // THIS IS WHERE IT SAVES TO SUPABASE PERMANENTLY
+        // SAVE TO DATABASE
         await saveOrdersToDb(mergedOrders);
 
         setOrders(mergedOrders);
         setNotification(`Imported & saved ${parsedOrders.length} orders.`);
         setTimeout(() => setNotification(null), 3000);
 
+        // Smart Tab Switching based on selection
         if (importCategory === 'RISK') setActiveTab('RISK');
         if (importCategory === 'DISPUTE_OPEN' || importCategory === 'DISPUTE_SUBMITTED') setActiveTab('DISPUTES');
         if (importCategory === 'DISPUTE_WON' || importCategory === 'DISPUTE_LOST') setActiveTab('HISTORY');
-        if (importCategory === 'AUTO') setActiveTab('ALL');
+        
       } catch (err: any) {
         console.error('CSV Import Error:', err);
         setError(`Failed to parse CSV file: ${err.message}`);
@@ -118,6 +132,7 @@ const App: React.FC = () => {
   };
 
   const handleRefresh = async () => {
+    // Just reload from DB in offline mode
     setLoading(true);
     try {
       const dbOrders = await loadOrdersFromDb();
@@ -139,8 +154,10 @@ const App: React.FC = () => {
   }
 
   return (
+    // 1. OUTER SHELL: Full screen, no overflow
     <div className="flex h-screen w-full bg-[#f1f2f4] overflow-hidden">
       
+      {/* Hidden File Input */}
       <input
         type="file"
         ref={fileInputRef}
@@ -163,51 +180,75 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <p className="text-sm text-zinc-600 mb-4">How should we classify the orders in this file?</p>
+            <p className="text-sm text-zinc-600 mb-4 font-medium">Select the status for these orders:</p>
 
-            <div className="space-y-3 mb-6">
-              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'AUTO' ? 'border-blue-500 bg-blue-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                <input type="radio" name="cat" checked={importCategory === 'AUTO'} onChange={() => setImportCategory('AUTO')} className="text-blue-600" />
+            <div className="space-y-2 mb-6 max-h-[400px] overflow-y-auto">
+              
+              {/* Option 1: Open Dispute */}
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_OPEN' ? 'border-amber-500 bg-amber-50 ring-1 ring-amber-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_OPEN'} onChange={() => setImportCategory('DISPUTE_OPEN')} className="text-amber-600 w-4 h-4" />
                 <div className="flex-1">
-                  <div className="font-medium text-sm text-zinc-900">Auto-Detect</div>
-                  <div className="text-xs text-zinc-500">Detects won, lost, chargeback tags</div>
+                  <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
+                    <AlertTriangle className="w-4 h-4 text-amber-600" />
+                    Chargeback Open
+                  </div>
+                  <div className="text-xs text-zinc-500 pl-6">Action Required / Response Needed</div>
                 </div>
               </label>
 
-              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'RISK' ? 'border-red-500 bg-red-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                <input type="radio" name="cat" checked={importCategory === 'RISK'} onChange={() => setImportCategory('RISK')} className="text-red-600" />
+              {/* Option 2: Submitted */}
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_SUBMITTED' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_SUBMITTED'} onChange={() => setImportCategory('DISPUTE_SUBMITTED')} className="text-blue-600 w-4 h-4" />
                 <div className="flex-1">
-                  <div className="font-medium text-sm text-zinc-900">High Risk / Fraud</div>
-                  <div className="text-xs text-zinc-500">Force all as High Risk (fraud.csv)</div>
+                  <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
+                    <Clock className="w-4 h-4 text-blue-600" />
+                    Chargeback Submitted
+                  </div>
+                  <div className="text-xs text-zinc-500 pl-6">Evidence sent / Under Review</div>
                 </div>
               </label>
 
-              <div className="flex gap-2">
-                <label className={`flex-1 flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_OPEN' ? 'border-orange-500 bg-orange-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                    <input type="radio" name="cat" checked={importCategory === 'DISPUTE_OPEN'} onChange={() => setImportCategory('DISPUTE_OPEN')} className="text-orange-600" />
-                    <div className="font-medium text-sm text-zinc-900">Open</div>
-                </label>
-                <label className={`flex-1 flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_SUBMITTED' ? 'border-blue-500 bg-blue-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                    <input type="radio" name="cat" checked={importCategory === 'DISPUTE_SUBMITTED'} onChange={() => setImportCategory('DISPUTE_SUBMITTED')} className="text-blue-600" />
-                    <div className="font-medium text-sm text-zinc-900">Submitted</div>
-                </label>
-              </div>
+              {/* Option 3: Won */}
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_WON' ? 'border-green-500 bg-green-50 ring-1 ring-green-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_WON'} onChange={() => setImportCategory('DISPUTE_WON')} className="text-green-600 w-4 h-4" />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
+                    <ThumbsUp className="w-4 h-4 text-green-600" />
+                    Dispute Won
+                  </div>
+                  <div className="text-xs text-zinc-500 pl-6">Case closed in your favor</div>
+                </div>
+              </label>
 
-              <div className="flex gap-2">
-                <label className={`flex-1 flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_WON' ? 'border-green-500 bg-green-50' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                  <input type="radio" name="cat" checked={importCategory === 'DISPUTE_WON'} onChange={() => setImportCategory('DISPUTE_WON')} className="text-green-600" />
-                  <div className="font-medium text-sm text-zinc-900">Won</div>
-                </label>
-                <label className={`flex-1 flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_LOST' ? 'border-zinc-500 bg-zinc-100' : 'border-zinc-200 hover:bg-zinc-50'}`}>
-                  <input type="radio" name="cat" checked={importCategory === 'DISPUTE_LOST'} onChange={() => setImportCategory('DISPUTE_LOST')} className="text-zinc-600" />
-                  <div className="font-medium text-sm text-zinc-900">Lost</div>
-                </label>
-              </div>
+              {/* Option 4: Lost */}
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'DISPUTE_LOST' ? 'border-zinc-500 bg-zinc-100 ring-1 ring-zinc-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'DISPUTE_LOST'} onChange={() => setImportCategory('DISPUTE_LOST')} className="text-zinc-600 w-4 h-4" />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
+                    <ThumbsDown className="w-4 h-4 text-zinc-600" />
+                    Dispute Lost
+                  </div>
+                  <div className="text-xs text-zinc-500 pl-6">Funds lost</div>
+                </div>
+              </label>
+
+              {/* Option 5: High Risk */}
+              <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${importCategory === 'RISK' ? 'border-red-500 bg-red-50 ring-1 ring-red-500' : 'border-zinc-200 hover:bg-zinc-50'}`}>
+                <input type="radio" name="cat" checked={importCategory === 'RISK'} onChange={() => setImportCategory('RISK')} className="text-red-600 w-4 h-4" />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 font-medium text-sm text-zinc-900">
+                    <ShieldAlert className="w-4 h-4 text-red-600" />
+                    High Risk / Fraud
+                  </div>
+                  <div className="text-xs text-zinc-500 pl-6">Suspicious orders (No dispute yet)</div>
+                </div>
+              </label>
+
             </div>
 
             <div className="flex gap-3">
               <button onClick={() => { setShowImportModal(false); setPendingFile(null); }} className="flex-1 py-2.5 bg-white border border-zinc-300 text-zinc-700 rounded-lg font-medium hover:bg-zinc-50">Cancel</button>
-              <button onClick={processImport} disabled={loading} className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">{loading ? 'Processing...' : 'Import Orders'}</button>
+              <button onClick={processImport} disabled={loading} className="flex-1 py-2.5 bg-zinc-900 text-white rounded-lg font-medium hover:bg-zinc-800 disabled:opacity-50">{loading ? 'Processing...' : 'Import Orders'}</button>
             </div>
           </div>
         </div>
@@ -237,7 +278,7 @@ const App: React.FC = () => {
         {/* Header */}
         <header className="h-14 flex-none bg-white border-b border-zinc-200 flex items-center justify-between px-6 z-20">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-zinc-800">Dispute Management</h1>
+            <h1 className="text-lg font-bold text-zinc-800 text-red-600">Dispute Management</h1>
             <span className="px-2 py-0.5 bg-zinc-100 text-zinc-600 text-xs rounded-full font-medium border border-zinc-200 flex items-center gap-1">
                Offline / CSV Mode
             </span>
