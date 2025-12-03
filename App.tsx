@@ -265,7 +265,7 @@ const App: React.FC = () => {
         <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative bg-[#f1f2f4] p-6">
           <div className="flex justify-between items-center mb-4 flex-none">
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-zinc-900">Fraud & Disputes</h2>
+              <h2 className="text-xl font-bold text-zinc-900">Fraud & Disputes v2</h2>
               <button onClick={handleRefresh} className="p-1.5 rounded-md hover:bg-zinc-200 text-zinc-500 transition-colors" title="Reload from Database">
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
