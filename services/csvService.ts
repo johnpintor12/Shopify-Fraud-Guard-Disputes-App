@@ -110,7 +110,8 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
     }
 
     // 4. Tag Check
-    // FIX: If user manually selected a category (NOT Auto), we allow missing tags.
+    // FIX: If user manually selected a category (NOT Auto), we allow missing tags
+    // because we will inject our own tag later.
     if (category === 'AUTO' && (!rawTags || rawTags.trim().length === 0)) {
         errorReasons.push("Missing Tags");
     }
@@ -160,7 +161,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
   }
 
   return Array.from(orderMap.values()).map(o => {
-    // --- DETERMINE CATEGORY FIRST (Even if Invalid) ---
+    // Determine category based on selection or tags
     const lowerTags = o.tags.map((t: string) => t.toLowerCase());
     let disputeStatus = DisputeStatus.NONE;
     let isHighRisk = o.nativeRisk;
@@ -184,7 +185,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
         isHighRisk = true;
         injectedTag = 'Import: Fraud';
     } else {
-        // AUTO DETECT
+        // Auto Detect
         if (lowerTags.some((t: string) => t.includes('won'))) {
             disputeStatus = DisputeStatus.WON;
             importCat = 'DISPUTE_WON';
@@ -209,7 +210,6 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
         finalTags.push(injectedTag);
     }
 
-    // --- NOW HANDLE INVALID STATE ---
     if (o.isInvalid) {
         return {
             id: o.id,
@@ -234,10 +234,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
             isHighRisk: false,
             disputeStatus: DisputeStatus.NONE,
             import_category: 'INVALID',
-            
-            // KEY CHANGE: Save the calculated category here!
-            original_category: importCat, 
-            
+            original_category: importCat, // SAVE THE CATEGORY
             import_error: o.importError, 
             additional_data: o.additional_data
         };
