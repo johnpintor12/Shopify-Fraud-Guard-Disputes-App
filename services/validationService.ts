@@ -1,4 +1,3 @@
-// src/services/validationService.ts
 import { Order, DisputeStatus, ImportCategory } from '../types';
 import { loadOrdersFromDb, saveOrdersToDb } from './storageService';
 
@@ -18,13 +17,13 @@ export const validateOrder = (order: Order): Order => {
   const isInvalid = errorReasons.length > 0;
 
   if (isInvalid) {
-    // Preserve original category if it exists, or grab current valid category
+    // Preserve original category if it exists, so we don't lose track of what it was
     const prevCategory = order.import_category !== 'INVALID' ? order.import_category : order.original_category;
 
     return {
       ...order,
       import_category: 'INVALID',
-      original_category: prevCategory, // <--- PRESERVE THIS
+      original_category: prevCategory,
       import_error: errorReasons.join(', '),
       isHighRisk: false, 
       disputeStatus: DisputeStatus.NONE 
@@ -32,8 +31,9 @@ export const validateOrder = (order: Order): Order => {
   } 
   
   if (!isInvalid && order.import_category === 'INVALID') {
-    // It was broken, now it's fixed.
-    // Use original_category if available, otherwise try to detect.
+    // RECOVERY LOGIC: It was broken, now it is fixed.
+    
+    // 1. Try to use the remembered original category
     let targetCategory = order.original_category;
     let classification = null;
 
@@ -45,8 +45,10 @@ export const validateOrder = (order: Order): Order => {
         else if (targetCategory === 'DISPUTE_OPEN') classification = { category: 'DISPUTE_OPEN', status: DisputeStatus.NEEDS_RESPONSE, isHighRisk: true };
         else classification = { category: 'RISK', status: DisputeStatus.NONE, isHighRisk: true };
     } else {
-        // Fallback to tags if no memory
+        // 2. Fallback to tags if no memory
         const tagClass = determineCategoryFromTags(order.tags);
+        
+        // 3. Last resort fallback for AUTO-SCAN (Default to Risk to avoid crash)
         classification = tagClass || { category: 'RISK', status: DisputeStatus.NONE, isHighRisk: true };
     }
 
@@ -62,8 +64,8 @@ export const validateOrder = (order: Order): Order => {
   return order;
 };
 
-// ... (Keep the rest of the file helpers: determineCategoryFromTags, applyFixesAndRevalidate, forceApproveOrder, revalidateDatabase) ...
-// The rest of this file is identical to the previous version provided.
+// --- HELPERS ---
+
 const determineCategoryFromTags = (tags: string[]) => {
     const lowerTags = tags.map(t => t.toLowerCase());
     
@@ -95,6 +97,7 @@ export const applyFixesAndRevalidate = (original: Order, updates: Partial<Order>
 };
 
 export const forceApproveOrder = (order: Order): Order => {
+    // STRICT CHECK: Manual approval must have a valid category
     const classification = determineCategoryFromTags(order.tags);
 
     if (!classification) {
