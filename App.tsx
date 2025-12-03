@@ -19,25 +19,26 @@ import {
   ThumbsDown,
   Bell,
   Info,
-  ChevronRight
+  ChevronRight,
+  Database,
+  ScanSearch // New Icon
 } from 'lucide-react';
 import { parseShopifyCSV } from './services/csvService';
 import { supabase } from './lib/supabase';
 import { fetchSavedDisputes } from './services/disputeService';
 import { loadOrdersFromDb, saveOrdersToDb } from './services/storageService';
 import { fetchAlerts, createAlert, markAlertsRead, clearAlerts } from './services/alertService';
+import { revalidateDatabase } from './services/validationService'; // Import the new service
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showSettings, setShowSettings] = useState(false); // Settings Modal Toggle
   
   // --- ALERT SYSTEM STATE ---
-  // Toasts are the temporary floating popups (UI only)
   const [toasts, setToasts] = useState<Alert[]>([]); 
-  // AlertHistory is the persistent list from the Database
   const [alertHistory, setAlertHistory] = useState<Alert[]>([]); 
-  
   const [showAlertHistory, setShowAlertHistory] = useState(false);
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   
@@ -49,9 +50,8 @@ const App: React.FC = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importCategory, setImportCategory] = useState<ImportCategory>('DISPUTE_OPEN');
 
-  // --- HELPER: ADD ALERT (DB + UI) ---
+  // --- HELPER: ADD ALERT ---
   const addToast = async (title: string, message: string, type: 'success' | 'error', details?: any) => {
-    // 1. Create locally for immediate UI feedback (Floating Toast)
     const tempId = Math.random().toString(36).substring(7);
     const tempToast: Alert = {
       id: tempId,
@@ -68,10 +68,7 @@ const App: React.FC = () => {
       setToasts((prev) => prev.filter((t) => t.id !== tempId));
     }, 5000);
 
-    // 2. Persist to Database
     const savedAlert = await createAlert(title, message, type, details);
-    
-    // 3. Update History List with the real DB record (or fallback to temp)
     if (savedAlert) {
         setAlertHistory((prev) => [savedAlert, ...prev]);
     } else {
@@ -100,7 +97,6 @@ const App: React.FC = () => {
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      // Parallel fetch: Orders + Alerts
       const [dbOrders, dbAlerts] = await Promise.all([
         loadOrdersFromDb(),
         fetchAlerts()
@@ -187,7 +183,6 @@ const App: React.FC = () => {
     try {
       const dbOrders = await loadOrdersFromDb();
       setOrders(dbOrders);
-      // Refresh alerts too
       const dbAlerts = await fetchAlerts();
       setAlertHistory(dbAlerts);
       
@@ -196,6 +191,26 @@ const App: React.FC = () => {
       addToast('Refresh Failed', 'Could not load data.', 'error', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRevalidate = async () => {
+    setLoading(true);
+    try {
+        const changes = await revalidateDatabase();
+        if (changes > 0) {
+            // Reload to see changes
+            const dbOrders = await loadOrdersFromDb();
+            setOrders(dbOrders);
+            addToast('Scan Complete', `Found and updated ${changes} orders with data issues.`, 'success');
+        } else {
+            addToast('Scan Complete', 'No new data issues found.', 'success');
+        }
+    } catch (err: any) {
+        addToast('Scan Failed', 'Could not revalidate database.', 'error', err);
+    } finally {
+        setLoading(false);
+        setShowSettings(false);
     }
   };
 
@@ -213,9 +228,7 @@ const App: React.FC = () => {
   const handleOpenAlertHistory = async () => {
       setShowAlertHistory(!showAlertHistory);
       if (!showAlertHistory) {
-          // If opening, mark as read in DB
           await markAlertsRead();
-          // Update local UI
           setAlertHistory(prev => prev.map(a => ({ ...a, read: true })));
       }
   };
@@ -237,7 +250,38 @@ const App: React.FC = () => {
         className="hidden"
       />
 
-      {/* --- ALERT DETAIL MODAL --- */}
+      {/* --- SETTINGS / TOOLS MODAL --- */}
+      {showSettings && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm border border-zinc-200">
+                <div className="px-6 py-4 border-b border-zinc-100 flex justify-between items-center bg-zinc-50 rounded-t-xl">
+                    <h3 className="font-bold text-zinc-900 flex items-center gap-2">
+                        <Database className="w-4 h-4" /> Data Tools
+                    </h3>
+                    <button onClick={() => setShowSettings(false)} className="text-zinc-400 hover:text-zinc-600"><X className="w-5 h-5"/></button>
+                </div>
+                
+                <div className="p-6 space-y-4">
+                    <div className="space-y-2">
+                        <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Maintenance</label>
+                        <button 
+                            onClick={handleRevalidate}
+                            disabled={loading}
+                            className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 text-blue-700 border border-blue-100 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium"
+                        >
+                            <ScanSearch className="w-5 h-5" />
+                            <div className="text-left">
+                                <div>Re-scan Database</div>
+                                <div className="text-xs opacity-70 font-normal">Check all orders for invalid data</div>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* --- ALERT DETAIL MODAL (Keep existing code) --- */}
       {selectedAlert && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
@@ -263,12 +307,6 @@ const App: React.FC = () => {
                             <pre className="whitespace-pre-wrap">{selectedAlert.details}</pre>
                         </div>
                     )}
-
-                    {selectedAlert.type === 'error' && (
-                        <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                            <strong>Potential Fix:</strong> Check if your database schema matches the code, or verify that your CSV file isn't corrupted.
-                        </div>
-                    )}
                 </div>
 
                 <div className="p-4 border-t border-zinc-100 bg-zinc-50 flex justify-end">
@@ -278,7 +316,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* --- IMPORT MODAL --- */}
+      {/* --- IMPORT MODAL (Keep existing code) --- */}
       {showImportModal && pendingFile && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 border border-zinc-200">
@@ -400,7 +438,7 @@ const App: React.FC = () => {
         <Sidebar
           activeTab={activeTab}
           onTabChange={setActiveTab}
-          onOpenSettings={() => {}} 
+          onOpenSettings={() => setShowSettings(true)}  // <--- ENABLED SETTINGS
           onClearData={() => { setOrders([]); addToast('Data Purged', 'All records cleared.', 'success'); }}
           orders={orders}
         />
