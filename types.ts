@@ -1,3 +1,4 @@
+// src/types.ts
 export enum PaymentStatus {
   PAID = 'Paid',
   PENDING = 'Pending',
@@ -37,6 +38,9 @@ export interface Customer {
   email: string;
   location: string;
   ordersCount: number;
+  // Added optional fields for better type safety
+  first_name?: string;
+  last_name?: string;
 }
 
 export interface SavedDispute {
@@ -48,8 +52,8 @@ export interface SavedDispute {
 }
 
 export interface Order {
-  id: string; // e.g., #439715
-  date: string;
+  id: string; 
+  date: string; // Display string (e.g. "Nov 23")
   customer: Customer;
   channel: string;
   total: number;
@@ -63,8 +67,13 @@ export interface Order {
   disputeStatus: DisputeStatus;
   disputeDeadline?: string;
   
-  // Database fields
+  // Database/Optional fields enabling strict typing
   savedDispute?: SavedDispute; 
+  created_at?: string; // Raw timestamp
+  currency?: string;
+  source_name?: string;
+  risk_category?: string;
+  import_category?: string;
 }
 
 export interface ShopifyCredentials {
