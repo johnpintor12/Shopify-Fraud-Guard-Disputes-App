@@ -1,12 +1,14 @@
-import React from 'react';
+// src/components/Sidebar.tsx
+import React, { useMemo } from 'react';
 import {
   ShieldAlert,
   AlertOctagon,
   CheckCircle2,
   ListChecks,
   Settings,
+  FileWarning
 } from 'lucide-react';
-import { TabType } from '../types';
+import { TabType, Order } from '../types';
 import ClearDataButton from './ClearDataButton';
 
 interface SidebarProps {
@@ -14,6 +16,7 @@ interface SidebarProps {
   onTabChange: (tab: TabType) => void;
   onOpenSettings: () => void;
   onClearData: () => void;
+  orders?: Order[]; // Added orders prop to check for errors
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -21,8 +24,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onTabChange,
   onOpenSettings,
   onClearData,
+  orders = []
 }) => {
-  const tabs: { id: TabType; label: string; icon: React.ReactNode }[] = [
+  
+  // Check if we have any broken data
+  const hasInvalidData = useMemo(() => {
+    return orders.some(o => o.import_category === 'INVALID');
+  }, [orders]);
+
+  const tabs: { id: TabType; label: string; icon: React.ReactNode; hidden?: boolean }[] = [
     {
       id: 'RISK',
       label: 'Fraud Monitoring',
@@ -43,12 +53,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'All Orders',
       icon: <ListChecks className="w-4 h-4" />,
     },
+    // Only show this if we have bad data
+    {
+      id: 'QUARANTINE',
+      label: 'Data Issues',
+      icon: <FileWarning className="w-4 h-4 text-amber-500" />,
+      hidden: !hasInvalidData
+    },
   ];
 
   return (
-    // h-full ensures it stretches. flex-col allows pushing content to bottom.
     <aside className="w-64 bg-white border-r border-zinc-200 flex flex-col h-full shrink-0">
-      {/* Brand / Title */}
       <div className="h-14 px-4 flex items-center border-b border-zinc-200 shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-xl bg-zinc-900 text-white flex items-center justify-center text-xs font-bold">
@@ -65,10 +80,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
 
-      {/* Nav Tabs */}
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <div className="space-y-1">
-          {tabs.map((tab) => {
+          {tabs.filter(t => !t.hidden).map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
@@ -94,7 +108,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </nav>
 
-      {/* DANGER ZONE: This div stays at the bottom because of flex-col + flex-1 above */}
       <div className="px-3 py-4 border-t border-zinc-100 bg-zinc-50 shrink-0">
         <ClearDataButton onCleared={onClearData} />
       </div>
