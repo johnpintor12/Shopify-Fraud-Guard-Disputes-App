@@ -27,10 +27,8 @@ export enum DisputeStatus {
   LOST = 'Lost'
 }
 
-// ADDED: 'QUARANTINE'
 export type TabType = 'RISK' | 'DISPUTES' | 'HISTORY' | 'ALL' | 'QUARANTINE';
 
-// ADDED: 'INVALID'
 export type ImportCategory = 'AUTO' | 'RISK' | 'DISPUTE_OPEN' | 'DISPUTE_SUBMITTED' | 'DISPUTE_WON' | 'DISPUTE_LOST' | 'INVALID';
 
 export interface Customer {
@@ -85,8 +83,10 @@ export interface Order {
   risk_category?: string;
   import_category?: string;
   
+  // NEW: Remembers what the order WAS before it became INVALID
+  original_category?: string; 
+  
   additional_data?: Record<string, any>;
-  // ADDED: Helpful error message for invalid rows
   import_error?: string; 
 }
 
