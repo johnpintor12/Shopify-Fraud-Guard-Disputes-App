@@ -1,56 +1,14 @@
-// src/services/storageService.ts
 import { supabase } from '../lib/supabase';
-import { Order, DisputeStatus } from '../types';
+import { Order } from '../types';
 
-// Rank for dispute statuses so we can pick the "strongest"
-const statusRank: Record<string, number> = {
-  none: 0,
-  open: 1,
-  submitted: 2,
-  won: 3,
-  lost: 3,
-  protected: 2,
-};
-
-// Map your app's DisputeStatus enum to a compact string we store in Supabase
-const mapDisputeStatus = (status?: DisputeStatus): string => {
-  switch (status) {
-    case DisputeStatus.NEEDS_RESPONSE:
-      return 'open';
-    case DisputeStatus.UNDER_REVIEW:
-      return 'submitted';
-    case DisputeStatus.WON:
-      return 'won';
-    case DisputeStatus.LOST:
-      return 'lost';
-    default:
-      return 'none';
-  }
-};
-
-// Infer the import source from the order's current state
-type ImportSource =
-  | 'fraud'
-  | 'dispute_open'
-  | 'dispute_submitted'
-  | 'dispute_won'
-  | 'dispute_lost'
-  | 'orders';
-
-const inferImportSource = (order: Order): ImportSource => {
-  switch (order.disputeStatus) {
-    case DisputeStatus.NEEDS_RESPONSE:
-      return 'dispute_open';
-    case DisputeStatus.UNDER_REVIEW:
-      return 'dispute_submitted';
-    case DisputeStatus.WON:
-      return 'dispute_won';
-    case DisputeStatus.LOST:
-      return 'dispute_lost';
-    default:
-      return order.isHighRisk ? 'fraud' : 'orders';
-  }
-};
+/**
+ * SINGLE DB STRATEGY:
+ * * We use a "Dump and Load" approach to avoid "Bad Request" schema errors.
+ * * 1. The 'Identifier' you asked for is the 'import_category' field inside the Order object.
+ * 2. We save the ENTIRE Order object into the 'data' JSONB column.
+ * 3. We do NOT try to write to individual columns like 'latest_dispute_status' anymore.
+ * This ensures that even if your DB lacks those columns, the import works perfectly.
+ */
 
 export const saveOrdersToDb = async (orders: Order[]) => {
   const {
@@ -65,64 +23,36 @@ export const saveOrdersToDb = async (orders: Order[]) => {
 
   if (!orders || orders.length === 0) return;
 
-  const ids = orders.map((o) => o.id);
-
-  // 1) Load existing rows to merge
-  const { data: existingRows, error: loadError } = await supabase
-    .from('orders')
-    .select('id, latest_dispute_status, latest_risk_label, sources')
-    .eq('user_id', user.id)
-    .in('id', ids);
-
-  if (loadError) throw loadError;
-
-  const existingById = new Map<string, any>(
-    (existingRows || []).map((row: any) => [row.id, row])
-  );
-
-  // 2) Build merged rows
+  // We map the orders to strictly match the 'orders' table structure:
+  // - user_id: The owner
+  // - id: The unique Order ID (e.g. #1001)
+  // - data: The CONTAINER for everything else (Identifier, Tags, Amounts, etc.)
   const upsertRows = orders.map((order) => {
-    const existing = existingById.get(order.id);
-
-    const prevStatus: string = existing?.latest_dispute_status || 'none';
-    const newStatus: string = mapDisputeStatus(order.disputeStatus);
-    const latestStatus =
-      statusRank[newStatus] >= statusRank[prevStatus] ? newStatus : prevStatus;
-
-    const prevRisk: string | null = existing?.latest_risk_label || null;
-    const newRisk = order.isHighRisk ? 'high' : null;
-    const latestRisk = newRisk || prevRisk;
-
-    const prevSources = (existing?.sources as Record<string, boolean>) || {};
-    const inferredSource = inferImportSource(order);
-    const newSources: Record<string, boolean> = {
-      ...prevSources,
-      [inferredSource]: true,
-    };
-
     return {
       user_id: user.id,
       id: order.id,
-      latest_dispute_status: latestStatus,
-      latest_risk_label: latestRisk,
-      sources: newSources,
-      data: order,
+      data: order, // <--- The Identifier (import_category) is saved inside here
       updated_at: new Date().toISOString(),
     };
   });
 
-  // 3) Upsert
+  // Perform the Upsert
   const { error: upsertError } = await supabase
     .from('orders')
     .upsert(upsertRows, { onConflict: 'user_id,id' });
 
-  if (upsertError) throw upsertError;
+  if (upsertError) {
+    console.error("Supabase Upsert Error:", upsertError); 
+    // Return a clear error message to the UI
+    throw new Error(`Database Error: ${upsertError.message}`);
+  }
 };
 
 export const loadOrdersFromDb = async (): Promise<Order[]> => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
+  // We just fetch the 'data' column
   const { data, error } = await supabase
     .from('orders')
     .select('data')
@@ -134,6 +64,7 @@ export const loadOrdersFromDb = async (): Promise<Order[]> => {
     return [];
   }
 
+  // And unwrap it so the UI gets the full Order object with Identifiers
   return (data || []).map((row: any) => row.data as Order);
 };
 
@@ -141,9 +72,6 @@ export const clearAllImportedData = async (): Promise<void> => {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated.');
 
-  // 1) Clear disputes
   await supabase.from('disputes').delete().eq('user_id', user.id);
-  
-  // 2) Clear orders
   await supabase.from('orders').delete().eq('user_id', user.id);
 };
