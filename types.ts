@@ -19,7 +19,6 @@ export enum DeliveryStatus {
   NO_STATUS = ''
 }
 
-// CRITICAL: This is the Enum that was missing and causing your error
 export enum DisputeStatus {
   NONE = 'None',
   NEEDS_RESPONSE = 'Needs Response',
@@ -28,9 +27,11 @@ export enum DisputeStatus {
   LOST = 'Lost'
 }
 
-export type TabType = 'RISK' | 'DISPUTES' | 'HISTORY' | 'ALL';
+// ADDED: 'QUARANTINE'
+export type TabType = 'RISK' | 'DISPUTES' | 'HISTORY' | 'ALL' | 'QUARANTINE';
 
-export type ImportCategory = 'AUTO' | 'RISK' | 'DISPUTE_OPEN' | 'DISPUTE_SUBMITTED' | 'DISPUTE_WON' | 'DISPUTE_LOST';
+// ADDED: 'INVALID'
+export type ImportCategory = 'AUTO' | 'RISK' | 'DISPUTE_OPEN' | 'DISPUTE_SUBMITTED' | 'DISPUTE_WON' | 'DISPUTE_LOST' | 'INVALID';
 
 export interface Customer {
   id: string;
@@ -50,7 +51,6 @@ export interface SavedDispute {
   created_at: string;
 }
 
-// New: Alert interface for the notification history
 export interface Alert {
   id: string;
   user_id?: string;
@@ -86,6 +86,8 @@ export interface Order {
   import_category?: string;
   
   additional_data?: Record<string, any>;
+  // ADDED: Helpful error message for invalid rows
+  import_error?: string; 
 }
 
 export interface ShopifyCredentials {
