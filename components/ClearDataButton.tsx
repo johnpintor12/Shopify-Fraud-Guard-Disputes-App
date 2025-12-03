@@ -1,75 +1,47 @@
-import React, { useState } from "react";
-import { Trash2 } from "lucide-react";
-import { supabase } from "../lib/supabase";
+// src/components/ClearDataButton.tsx
+import React, { useState } from 'react';
+import { Trash2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface ClearDataButtonProps {
-  userId: string;
-  onCleared?: () => void;
+  onCleared: () => void;
 }
 
-export const ClearDataButton: React.FC<ClearDataButtonProps> = ({
-  userId,
-  onCleared,
-}) => {
-  const [isClearing, setIsClearing] = useState(false);
+const ClearDataButton: React.FC<ClearDataButtonProps> = ({ onCleared }) => {
+  const [loading, setLoading] = useState(false);
 
   const handleClear = async () => {
-    if (!userId || isClearing) return;
-
-    const confirmed = window.confirm(
-      "This will permanently delete ALL imported orders and disputes for this account.\n\nThe tables remain, but your records will be wiped.\n\nAre you sure you want to continue?"
+    const ok = window.confirm(
+      'This will delete ALL imported orders from the database (but keep the table). Continue?'
     );
+    if (!ok) return;
 
-    if (!confirmed) return;
-
-    setIsClearing(true);
+    setLoading(true);
     try {
-      // Delete disputes first
-      const { error: disputesError } = await supabase
-        .from("disputes")
-        .delete()
-        .eq("user_id", userId);
-
-      if (disputesError) throw disputesError;
-
-      // Delete orders for this user
-      const { error: ordersError } = await supabase
-        .from("orders")
-        .delete()
-        .eq("user_id", userId);
-
-      if (ordersError) throw ordersError;
-
-      if (onCleared) onCleared();
-      alert("All imported data has been cleared for this account.");
-    } catch (err: any) {
-      console.error("Failed to clear data", err);
-      alert(
-        "Failed to clear data from Supabase.\n\n" +
-          (err?.message || "Unknown error.")
-      );
+      // delete all rows from orders table
+      const { error } = await supabase.from('orders').delete().neq('id', '');
+      if (error) {
+        console.error(error);
+        alert('Failed to clear data. Check console for details.');
+        return;
+      }
+      onCleared();
     } finally {
-      setIsClearing(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <span className="text-[10px] uppercase tracking-wide font-semibold text-red-500">
-        Danger zone
-      </span>
-      <button
-        type="button"
-        onClick={handleClear}
-        disabled={isClearing}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium
-                   border-red-300 text-red-600 bg-white hover:bg-red-50 disabled:opacity-50
-                   disabled:cursor-not-allowed"
-        title="Clear all imported data for this account"
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-        {isClearing ? "Clearing…" : "Clear imported data"}
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={handleClear}
+      disabled={loading}
+      className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-md border border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100 disabled:opacity-60"
+    >
+      <Trash2 className="w-3 h-3" />
+      {loading ? 'Clearing…' : 'Clear imported data'}
+    </button>
   );
 };
+
+export default ClearDataButton;
