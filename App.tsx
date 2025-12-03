@@ -244,7 +244,7 @@ const App: React.FC = () => {
         {/* Header */}
         <header className="h-14 flex-none bg-white border-b border-zinc-200 flex items-center justify-between px-6 z-20">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-zinc-800">Dispute Management v2</h1>
+            <h1 className="text-lg font-bold text-zinc-800">Dispute Management</h1>
             <span className="px-2 py-0.5 bg-zinc-100 text-zinc-600 text-xs rounded-full font-medium border border-zinc-200 flex items-center gap-1">
                Offline / CSV Mode
             </span>
@@ -265,7 +265,7 @@ const App: React.FC = () => {
         <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative bg-[#f1f2f4] p-6">
           <div className="flex justify-between items-center mb-4 flex-none">
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-zinc-900">Fraud & Disputes v2</h2>
+              <h2 className="text-xl font-bold text-zinc-900">Fraud & Disputes</h2>
               <button onClick={handleRefresh} className="p-1.5 rounded-md hover:bg-zinc-200 text-zinc-500 transition-colors" title="Reload from Database">
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               </button>
