@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { OrderTable } from './components/OrderTable';
 import { Auth } from './components/Auth';
-import { Order, TabType, ImportCategory } from './types';
+import { Order, TabType, ImportCategory, Alert } from './types';
 import {
   LogOut,
   CheckCircle,
@@ -25,17 +25,7 @@ import { parseShopifyCSV } from './services/csvService';
 import { supabase } from './lib/supabase';
 import { fetchSavedDisputes } from './services/disputeService';
 import { loadOrdersFromDb, saveOrdersToDb } from './services/storageService';
-
-// Extended Toast Interface to support detailed history
-interface Toast {
-  id: string;
-  title: string;
-  message: string; // Short version
-  details?: string; // Long technical version
-  type: 'success' | 'error';
-  timestamp: Date;
-  read: boolean;
-}
+import { fetchAlerts, createAlert, markAlertsRead, clearAlerts } from './services/alertService';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -43,10 +33,13 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   
   // --- ALERT SYSTEM STATE ---
-  const [toasts, setToasts] = useState<Toast[]>([]); // Floating temporary toasts
-  const [alertHistory, setAlertHistory] = useState<Toast[]>([]); // Persistent history
-  const [showAlertHistory, setShowAlertHistory] = useState(false); // Toggle dropdown
-  const [selectedAlert, setSelectedAlert] = useState<Toast | null>(null); // For Detail Modal
+  // Toasts are the temporary floating popups (UI only)
+  const [toasts, setToasts] = useState<Alert[]>([]); 
+  // AlertHistory is the persistent list from the Database
+  const [alertHistory, setAlertHistory] = useState<Alert[]>([]); 
+  
+  const [showAlertHistory, setShowAlertHistory] = useState(false);
+  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   
   const [activeTab, setActiveTab] = useState<TabType>('RISK');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -56,38 +49,34 @@ const App: React.FC = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importCategory, setImportCategory] = useState<ImportCategory>('DISPUTE_OPEN');
 
-  // --- HELPER: ADD ALERT ---
-  const addToast = (title: string, message: string, type: 'success' | 'error', details?: any) => {
-    const id = Math.random().toString(36).substring(7);
-    
-    // Format details if it's an object/error
-    let detailString = details;
-    if (typeof details === 'object') {
-        detailString = JSON.stringify(details, null, 2);
-    }
-
-    const newToast: Toast = {
-      id,
+  // --- HELPER: ADD ALERT (DB + UI) ---
+  const addToast = async (title: string, message: string, type: 'success' | 'error', details?: any) => {
+    // 1. Create locally for immediate UI feedback (Floating Toast)
+    const tempId = Math.random().toString(36).substring(7);
+    const tempToast: Alert = {
+      id: tempId,
       title,
       message,
-      details: detailString,
       type,
-      timestamp: new Date(),
-      read: false
+      details: typeof details === 'object' ? JSON.stringify(details) : details,
+      read: false,
+      created_at: new Date().toISOString()
     };
 
-    // Add to floating stack (auto-remove)
-    setToasts((prev) => [...prev, newToast]);
+    setToasts((prev) => [...prev, tempToast]);
     setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
+      setToasts((prev) => prev.filter((t) => t.id !== tempId));
     }, 5000);
 
-    // Add to persistent history
-    setAlertHistory((prev) => [newToast, ...prev]);
-  };
-
-  const markAllRead = () => {
-    setAlertHistory(prev => prev.map(a => ({ ...a, read: true })));
+    // 2. Persist to Database
+    const savedAlert = await createAlert(title, message, type, details);
+    
+    // 3. Update History List with the real DB record (or fallback to temp)
+    if (savedAlert) {
+        setAlertHistory((prev) => [savedAlert, ...prev]);
+    } else {
+        setAlertHistory((prev) => [tempToast, ...prev]);
+    }
   };
 
   // 1. Auth & Session Management
@@ -101,7 +90,7 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // 2. Load Only Local DB Orders
+  // 2. Load Data on Startup
   useEffect(() => {
     if (session) {
       loadInitialData();
@@ -111,14 +100,24 @@ const App: React.FC = () => {
   const loadInitialData = async () => {
     setLoading(true);
     try {
-      const dbOrders = await loadOrdersFromDb();
+      // Parallel fetch: Orders + Alerts
+      const [dbOrders, dbAlerts] = await Promise.all([
+        loadOrdersFromDb(),
+        fetchAlerts()
+      ]);
+
       if (dbOrders.length > 0) {
         setOrders(dbOrders);
         setActiveTab('ALL'); 
       }
+      
+      if (dbAlerts) {
+        setAlertHistory(dbAlerts);
+      }
+
     } catch (err: any) {
       console.error(err);
-      addToast('Load Error', 'Failed to load orders from database.', 'error', err);
+      addToast('Load Error', 'Failed to load data from database.', 'error', err);
     } finally {
       setLoading(false);
     }
@@ -168,12 +167,11 @@ const App: React.FC = () => {
         
       } catch (err: any) {
         console.error('CSV Import Error:', err);
-        // Pass the full error object so it shows in the modal
         addToast(
             'Import Failed', 
             err.message || 'Unknown error occurred during import.', 
             'error',
-            err // Pass full object for "details"
+            err
         );
       } finally {
         setLoading(false);
@@ -189,6 +187,10 @@ const App: React.FC = () => {
     try {
       const dbOrders = await loadOrdersFromDb();
       setOrders(dbOrders);
+      // Refresh alerts too
+      const dbAlerts = await fetchAlerts();
+      setAlertHistory(dbAlerts);
+      
       addToast('Refreshed', 'Data synced from database.', 'success');
     } catch (err: any) {
       addToast('Refresh Failed', 'Could not load data.', 'error', err);
@@ -200,6 +202,22 @@ const App: React.FC = () => {
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     setOrders([]);
+    setAlertHistory([]);
+  };
+
+  const handleClearAlerts = async () => {
+      await clearAlerts();
+      setAlertHistory([]);
+  };
+
+  const handleOpenAlertHistory = async () => {
+      setShowAlertHistory(!showAlertHistory);
+      if (!showAlertHistory) {
+          // If opening, mark as read in DB
+          await markAlertsRead();
+          // Update local UI
+          setAlertHistory(prev => prev.map(a => ({ ...a, read: true })));
+      }
   };
 
   const unreadCount = alertHistory.filter(a => !a.read).length;
@@ -228,7 +246,7 @@ const App: React.FC = () => {
                         {selectedAlert.type === 'error' ? <AlertCircle className="w-6 h-6 text-red-600"/> : <CheckCircle className="w-6 h-6 text-green-600"/>}
                         <div>
                             <h3 className={`font-bold text-lg ${selectedAlert.type === 'error' ? 'text-red-900' : 'text-green-900'}`}>{selectedAlert.title}</h3>
-                            <p className="text-xs opacity-70">{selectedAlert.timestamp.toLocaleString()}</p>
+                            <p className="text-xs opacity-70">{new Date(selectedAlert.created_at).toLocaleString()}</p>
                         </div>
                     </div>
                     <button onClick={() => setSelectedAlert(null)} className="p-2 hover:bg-black/5 rounded-full transition-colors"><X className="w-5 h-5 opacity-50"/></button>
@@ -248,7 +266,7 @@ const App: React.FC = () => {
 
                     {selectedAlert.type === 'error' && (
                         <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                            <strong>Potential Fix:</strong> Check if your database schema matches the code, or verify that your CSV file isn't corrupted. If this persists, try purging data and re-importing.
+                            <strong>Potential Fix:</strong> Check if your database schema matches the code, or verify that your CSV file isn't corrupted.
                         </div>
                     )}
                 </div>
@@ -402,7 +420,7 @@ const App: React.FC = () => {
             {/* ALERT HISTORY DROPDOWN */}
             <div className="relative">
                 <button 
-                    onClick={() => { setShowAlertHistory(!showAlertHistory); markAllRead(); }} 
+                    onClick={handleOpenAlertHistory} 
                     className="relative p-2 text-zinc-500 hover:bg-zinc-100 rounded-full transition-colors"
                 >
                     <Bell className="w-5 h-5" />
@@ -415,7 +433,7 @@ const App: React.FC = () => {
                     <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-xl border border-zinc-200 z-[90] overflow-hidden">
                         <div className="px-4 py-2 border-b border-zinc-100 bg-zinc-50 flex justify-between items-center">
                             <span className="text-xs font-semibold text-zinc-600">Alert History</span>
-                            <button onClick={() => setAlertHistory([])} className="text-[10px] text-zinc-400 hover:text-red-600">Clear</button>
+                            <button onClick={handleClearAlerts} className="text-[10px] text-zinc-400 hover:text-red-600 transition-colors">Clear All</button>
                         </div>
                         <div className="max-h-64 overflow-y-auto">
                             {alertHistory.length === 0 ? (
@@ -431,7 +449,7 @@ const App: React.FC = () => {
                                         <div className="flex-1 min-w-0">
                                             <div className="flex justify-between items-baseline mb-0.5">
                                                 <span className={`text-xs font-semibold ${alert.type === 'error' ? 'text-red-900' : 'text-zinc-900'}`}>{alert.title}</span>
-                                                <span className="text-[10px] text-zinc-400">{alert.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                                <span className="text-[10px] text-zinc-400">{new Date(alert.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                             </div>
                                             <p className="text-[11px] text-zinc-500 truncate">{alert.message}</p>
                                         </div>
