@@ -1,5 +1,5 @@
 // src/services/validationService.ts
-import { Order, PaymentStatus, FulfillmentStatus, DeliveryStatus, DisputeStatus } from '../types';
+import { Order, DisputeStatus, ImportCategory } from '../types';
 import { loadOrdersFromDb, saveOrdersToDb } from './storageService';
 
 // --- RULES ENGINE ---
@@ -34,51 +34,120 @@ export const validateOrder = (order: Order): Order => {
 
   // LOGIC:
   // If it fails rules -> Move to INVALID
-  // If it passes rules AND was previously INVALID -> Move to RISK (Safe default)
-  // If it passes rules AND was NOT INVALID -> Keep existing category (Don't touch Won/Lost/Open)
+  // If it passes rules AND was previously INVALID -> Move to INTELLIGENT CATEGORY (Restore)
+  // If it passes rules AND was NOT INVALID -> Keep existing category
 
   if (isInvalid) {
     return {
       ...order,
       import_category: 'INVALID',
       import_error: errorReasons.join(', '),
-      isHighRisk: false, // Hide from risk tab
-      disputeStatus: DisputeStatus.NONE // Hide from dispute tab
+      isHighRisk: false, 
+      disputeStatus: DisputeStatus.NONE 
     };
   } 
   
   if (!isInvalid && order.import_category === 'INVALID') {
-    // It was broken, now it's fixed. Restore to a safe bucket.
+    // It was broken, now it's fixed.
+    // Try to determine where it belongs.
+    const classification = determineCategoryFromTags(order.tags);
+
+    // For AUTO-SCAN only: If we can't figure it out, default to RISK (Safe Fallback)
+    // We don't want to throw errors during a background scan.
+    const finalClass = classification || { 
+        category: 'RISK', 
+        status: DisputeStatus.NONE, 
+        isHighRisk: true 
+    };
+
     return {
       ...order,
-      import_category: 'RISK', // Default bucket for recovered items
+      import_category: finalClass.category as ImportCategory,
       import_error: undefined,
-      isHighRisk: true
+      disputeStatus: finalClass.status,
+      isHighRisk: finalClass.isHighRisk
     };
   }
 
-  // Data is fine, leave it alone
   return order;
 };
 
+// --- NEW HELPERS ---
+
+/**
+ * Helper to figure out where an order belongs based on tags.
+ * Returns NULL if it can't find a matching tag.
+ */
+const determineCategoryFromTags = (tags: string[]) => {
+    const lowerTags = tags.map(t => t.toLowerCase());
+    
+    if (lowerTags.some(t => t.includes('won'))) {
+        return { category: 'DISPUTE_WON', status: DisputeStatus.WON, isHighRisk: false };
+    } 
+    if (lowerTags.some(t => t.includes('lost'))) {
+        return { category: 'DISPUTE_LOST', status: DisputeStatus.LOST, isHighRisk: false };
+    } 
+    if (lowerTags.some(t => t.includes('submitted') || t.includes('under review'))) {
+        return { category: 'DISPUTE_SUBMITTED', status: DisputeStatus.UNDER_REVIEW, isHighRisk: true };
+    } 
+    if (lowerTags.some(t => t.includes('open') || t.includes('chargeback') || t.includes('dispute'))) {
+        return { category: 'DISPUTE_OPEN', status: DisputeStatus.NEEDS_RESPONSE, isHighRisk: true };
+    }
+    // No specific category found
+    return null;
+};
+
+/**
+ * Applies manual edits to an order and immediately re-checks if it is valid.
+ */
+export const applyFixesAndRevalidate = (original: Order, updates: Partial<Order>): Order => {
+    const merged = { 
+        ...original, 
+        ...updates,
+        customer: {
+            ...original.customer,
+            ...(updates.customer || {})
+        }
+    };
+    return validateOrder(merged);
+};
+
+/**
+ * Forcefully moves an order out of Quarantine.
+ * STRICT MODE: Throws an error if the tags don't clearly indicate where the order belongs.
+ */
+export const forceApproveOrder = (order: Order): Order => {
+    const classification = determineCategoryFromTags(order.tags);
+
+    // If we can't tell what this order is, FAIL and tell the user to fix it.
+    if (!classification) {
+        throw new Error(
+            "Cannot determine order type. Please EDIT the tags to include 'won', 'lost', 'submitted', or 'chargeback' before marking as valid."
+        );
+    }
+
+    return {
+        ...order,
+        import_category: classification.category as ImportCategory,
+        disputeStatus: classification.status,
+        isHighRisk: classification.isHighRisk,
+        import_error: undefined
+    };
+};
+
 export const revalidateDatabase = async (): Promise<number> => {
-  // 1. Load everything
   const allOrders = await loadOrdersFromDb();
   if (allOrders.length === 0) return 0;
 
-  // 2. Run validation on everything
   let changesCount = 0;
   const validatedOrders = allOrders.map(order => {
     const validated = validateOrder(order);
-    
-    // Check if anything actually changed to avoid useless writes
     if (validated.import_category !== order.import_category || validated.import_error !== order.import_error) {
       changesCount++;
     }
     return validated;
   });
 
-  // 3. Save back if changes found
   if (changesCount > 0) {
     await saveOrdersToDb(validatedOrders);
   }
