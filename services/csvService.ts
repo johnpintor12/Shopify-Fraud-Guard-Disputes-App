@@ -1,7 +1,6 @@
 // src/services/csvService.ts
 import { Order, PaymentStatus, FulfillmentStatus, DeliveryStatus, DisputeStatus, ImportCategory } from '../types';
 
-// Helper to handle CSV lines with commas inside quotes
 const parseCSVLine = (line: string): string[] => {
   const result: string[] = [];
   let current = '';
@@ -50,10 +49,11 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
   if (lines.length < 2) throw new Error("CSV file is empty or invalid.");
 
   // Normalize headers
-  const headers = parseCSVLine(lines[0]).map(h => h.trim().toLowerCase());
+  const rawHeaders = parseCSVLine(lines[0]);
+  const headers = rawHeaders.map(h => h.trim().toLowerCase());
   const getIndex = (name: string) => headers.indexOf(name.toLowerCase());
   
-  // Dynamic column mapping (handles standard export formats)
+  // Standard Columns Map
   const idx = {
     name: getIndex('Name'),
     createdAt: getIndex('Created at'),
@@ -63,7 +63,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
     total: getIndex('Total'),
     currency: getIndex('Currency'),
     tags: getIndex('Tags'),
-    riskLevel: getIndex('Risk Level'), // New: Read native Shopify Risk Level
+    riskLevel: getIndex('Risk Level'),
     shippingName: getIndex('Shipping Name'),
     shippingCity: getIndex('Shipping City'),
     shippingProvince: getIndex('Shipping Province'),
@@ -88,13 +88,18 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
     const id = val(idx.name);
     if (!id) continue;
 
-    // Group line items
+    // Capture ALL extra columns for flexibility
+    const extraData: Record<string, string> = {};
+    rawHeaders.forEach((header, index) => {
+        // Skip the standard mapped columns to avoid duplication, or keep everything
+        // Here we just keep everything in 'additional_data' for safety
+        extraData[header] = val(index);
+    });
+
     if (!orderMap.has(id)) {
       const tagsString = val(idx.tags);
-      // Clean up tags (remove quotes/spaces)
       const tagsList = tagsString.split(',').map(t => t.trim().replace(/^"|"$/g, '')).filter(t => t);
       
-      // Parse Risk Level from CSV (High/Medium/Low)
       const csvRisk = val(idx.riskLevel).toLowerCase();
       const isNativeHighRisk = csvRisk === 'high' || csvRisk === 'medium';
 
@@ -116,12 +121,13 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
         total: parseFloat(val(idx.total) || '0'),
         currency: val(idx.currency) || 'USD',
         tags: tagsList,
-        nativeRisk: isNativeHighRisk, // Store this to combine with override logic later
+        nativeRisk: isNativeHighRisk,
         customerName: val(idx.shippingName) || 'Guest',
         location: location,
         shippingMethod: val(idx.shippingMethod),
         itemsCount: 0,
         isCancelled: !!val(idx.cancelReason),
+        additional_data: extraData // Store the full raw CSV row here
       });
     }
 
@@ -130,21 +136,18 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
     order.itemsCount += qty > 0 ? qty : 0;
   }
 
-  // Convert to App Order Objects
   return Array.from(orderMap.values()).map(o => {
     const lowerTags = o.tags.map((t: string) => t.toLowerCase());
     
     let disputeStatus = DisputeStatus.NONE;
-    let isHighRisk = o.nativeRisk; // Default to what the CSV says
+    let isHighRisk = o.nativeRisk;
     let importCat = category; 
     let injectedTag = '';
 
-    // --- LOGIC: Apply Overrides based on User Selection ---
-    
-    // 1. Force Manual Categories (Overrides everything)
+    // Logic: Force Categories
     if (category === 'DISPUTE_OPEN') {
         disputeStatus = DisputeStatus.NEEDS_RESPONSE;
-        isHighRisk = true; // Disputes are inherently risk
+        isHighRisk = true; 
         injectedTag = 'Import: Open Dispute';
     } else if (category === 'DISPUTE_SUBMITTED') {
         disputeStatus = DisputeStatus.UNDER_REVIEW;
@@ -159,9 +162,7 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
         isHighRisk = true;
         injectedTag = 'Import: Fraud';
     } else {
-        // 2. AUTO DETECT (Fallback if user selected 'Auto')
-        // Only works if tags are actually present in the file
-        
+        // Auto Detect
         if (lowerTags.some((t: string) => t.includes('won'))) {
             disputeStatus = DisputeStatus.WON;
             importCat = 'DISPUTE_WON';
@@ -181,8 +182,6 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
         }
     }
 
-    // INJECT TAG: Add a visual tag so the user knows why it's categorized this way
-    // This solves the "inventory confusion" problem.
     const finalTags = [...o.tags];
     if (injectedTag && !finalTags.includes(injectedTag)) {
         finalTags.push(injectedTag);
@@ -207,12 +206,13 @@ export const parseShopifyCSV = (csvText: string, category: ImportCategory = 'AUT
       itemsCount: o.itemsCount,
       deliveryStatus: o.fulfillment?.toLowerCase() === 'fulfilled' ? DeliveryStatus.DELIVERED : DeliveryStatus.NO_STATUS,
       deliveryMethod: o.shippingMethod,
-      tags: finalTags, // Use the enhanced tags list
+      tags: finalTags,
       isHighRisk: isHighRisk,
       risk_category: isHighRisk ? 'High Risk' : 'Normal',
       disputeStatus: disputeStatus,
       disputeDeadline: disputeStatus === DisputeStatus.NEEDS_RESPONSE ? 'Review CSV Data' : undefined,
-      import_category: importCat
+      import_category: importCat,
+      additional_data: o.additional_data // Saves the raw extra columns to DB
     };
   });
 };
